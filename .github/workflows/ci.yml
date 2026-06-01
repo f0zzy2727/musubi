@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tmux (for the real-tmux integration test)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Python syntax check
+        run: python -m py_compile orchestrator.py
+
+      - name: Shell syntax check
+        run: |
+          bash -n bootstrap.sh
+          bash -n launch_musubi_tmux.sh
+          bash -n scripts/guard-staged-scope.sh
+          bash -n scripts/ci-baseline.sh
+          bash -n scripts/attach-oya.sh
+          bash -n scripts/cwd-preflight.sh
+          bash -n scripts/classify-slice.sh
+          bash -n scripts/doctor.sh
+          # launch_musubi.sh is zsh (macOS-default-shell launcher) and is
+          # intentionally not checked here. Operators who modify it should
+          # `zsh -n launch_musubi.sh` locally before pushing.
+
+      - name: Shellcheck
+        run: |
+          shellcheck bootstrap.sh launch_musubi_tmux.sh scripts/guard-staged-scope.sh scripts/ci-baseline.sh scripts/attach-oya.sh scripts/cwd-preflight.sh scripts/classify-slice.sh scripts/doctor.sh
+
+      - name: Run tests
+        run: pytest tests/ -v

@@ -1,0 +1,122 @@
+# musubi.toml.example
+# Copy this to musubi.toml and update the values for your project.
+# musubi.toml is gitignored — this file is the shareable template.
+
+[project]
+path = "/path/to/your/project"           # absolute path to the codebase the agents will work on
+
+[agents]
+
+[agents.opus]
+name = "Opus"                            # display name — change to whatever you like
+handle = "@OPUS"                         # used in comms file headers and relay routing
+cli = "claude"                           # CLI command to start this agent
+
+[agents.coda]
+name = "Coda"                            # display name — change to whatever you like
+handle = "@CODA"                         # used in comms file headers and relay routing
+cli = "codex"                            # CLI command to start this agent
+
+[comms]
+file = "docs/agents/comms/active.txt"    # active comms transcript — relative to project root
+                                         # gitignore docs/agents/comms/ in your project
+                                         # archive completed cycles to docs/agents/archive/ and commit those
+                                         # absolute paths (e.g. /tmp/agent_comms.txt) also work but won't survive a reboot
+over_signal = "<OVER>"                   # turn signal — agents append this when done with a message
+runbook = "docs/agents/AGENT_COLLAB_RUNBOOK.md"          # protocol authority (per-cycle rules)
+operating_model = "docs/agents/PAIR_OPERATING_MODEL.md"  # rationale + adoption guide
+
+# Optional tuning knobs (uncomment to override defaults):
+# archive_dir = "docs/agents/archive"                    # where rotated comms transcripts land; relative to project.path
+# send_pause_seconds = 0.5                               # pause between paste and Enter in relay; raise for high-latency tmux (SSH)
+# stall_seconds = 45                                     # how long to wait for <OVER> before nudging the writing agent
+
+[tmux]
+session_name = "musubi"                  # tmux session name — change if running multiple sessions
+
+# --- Optional: Oyakata (Oya) third-agent layer -----------------------------
+# Default musubi is a two-agent pair (Opus + Coda). Oya is an optional third
+# agent — a supervisor who watches the pair, builds context across events, and
+# intervenes via `@OYA` comms messages when judgement-shaped patterns warrant
+# it. Most projects do NOT need this; the pair plus the v1.7 mechanical guards
+# is enough for most cycles.
+#
+# Enable Oya when:
+#   - Cycles are long/complex and asymmetric-deference risk is real
+#   - You want a third-mind audit of your pair's Findings discipline
+#   - You're remote/away and want better in-flight cycle visibility
+#
+# To enable: uncomment the block below and set `enabled = true`. The
+# orchestrator auto-spawns the Oya pane (via scripts/attach-oya.sh) on your
+# next launch of musubi — no extra commands or flags. See
+# docs/operator/oyakata-prompt-v0.1.md for the full prompt + behavioural
+# contract Oya runs under.
+#
+# [agents.oyakata]
+# enabled = true                              # turn on the Oya layer
+# handle = "@OYA"                             # comms handle Oya posts under
+# pane_title = "OYAKATA"                      # tmux pane title substring
+# heartbeat_threshold = 5                     # warn if Oya hasn't written this many relays in a row
+# notify_on_capsule_edit = true               # ping Oya when docs/agents/current-state.md changes
+# log_path = "docs/agents/oyakata-log.md"     # where Oya writes observations (relative to project.path)
+# context_docs = ["docs/PRODUCT-VISION.md", "docs/ROADMAP.md", "docs/ARCHITECTURE.md"]
+#   ^ Optional. Explicit vision/architecture/roadmap docs Oya reads at startup so
+#     she can custodian the strategy, not just the code. Paths are relative to
+#     project.path. If omitted, Oya auto-discovers the recognised files
+#     (PRODUCT-VISION/VISION/PRD/README, docs/adr/*, ROADMAP/BACKLOG) and asks you
+#     on turn one if she finds none. Set this to guarantee she reads YOUR docs.
+
+# --- Optional: [agents.oyakata.permissions] block (oyakata-2 PreToolUse hook) -
+# Auto-approves a small fixed allowlist of read-only operations on Opus's
+# Claude Code so it doesn't halt on permission prompts for `Read`, `Grep`,
+# `Glob`, `NotebookRead`, or read-only Bash commands (`git status`/`log`/
+# `diff`/`show`, `pwd`, `ls`, `cat`, `head`/`tail`, `wc`, `file`, `stat`,
+# `which`, etc.). Anything containing a shell metacharacter (|, >, <, ;, &,
+# $(, backtick) defers regardless. Everything else falls through to the
+# normal permission flow — the operator still decides on state changes.
+#
+# Closes the canonical Opus-halted-on-permission case from the 2026-05-15
+# spike (~2 hours blocked on a read prompt). See docs/operator/oyakata-permissions.md
+# for the wiring details and what's NOT in this slice (Oya-as-decider,
+# escalation, Codex parity).
+#
+# When `enabled = true`, the orchestrator idempotently registers the hook
+# in `<project_path>/.claude/settings.local.json` on each launch. Adds the
+# entry on first run; updates the command path if you move your musubi
+# checkout; no-ops if the entry already matches. The orchestrator NEVER
+# touches your project's `.claude/settings.json` (committed config) — only
+# the gitignored `.claude/settings.local.json`.
+#
+# This is OPT-IN. Default is off because the hook changes the agent's
+# authority surface (auto-approves without prompting).
+#
+# Mirror the gitignore entry from musubi's own .gitignore into your
+# project's .gitignore:
+#   docs/agents/oyakata-decisions.md
+#
+# [agents.oyakata.permissions]
+# enabled = true                              # opt into the PreToolUse hook layer
+
+# --- Optional: [requires.skills] block (v0.3+ strategic-Oya prereq) --------
+# Strategic-Oya (v0.3 and later) leans on gstack for the engineering-discipline
+# artefacts she watches for — threat models (cso), architecture reviews
+# (plan-eng-review), pre-landing diff reviews (review). When this block is
+# present, the orchestrator checks at startup that the declared skills are
+# installed and warns loudly on missing core skills. It NEVER refuses to
+# launch — strategic-Oya degrades to advisory text when core skills are
+# absent, and pair-only musubi works regardless.
+#
+# Pair-only musubi (no Oya) does NOT require this block. Enable it when:
+#   - You're running [agents.oyakata].enabled = true AND want strategic
+#     supervision (not just process observation)
+#   - You want a visible pre-flight check on gstack regardless of Oya
+#
+# Strategic-Oya treats gstack as its engineering-discipline primitive layer
+# (it orchestrates gstack skills across cycles; gstack provides the discipline
+# content). Install gstack first if you don't have it, then point the skills
+# below at your install.
+#
+# [requires.skills]
+# core = ["cso", "plan-eng-review", "review"]                 # warned-on if missing; strategic-Oya degrades
+# recommended = ["plan-ceo-review", "office-hours", "investigate", "codex", "canary", "qa", "design-review"]   # info-only on missing
+# path = "~/.claude/skills/gstack"            # override if gstack lives elsewhere

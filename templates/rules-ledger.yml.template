@@ -1,0 +1,560 @@
+# musubi rules ledger — per-project instrumentation of named runbook rules.
+#
+# Schema authority: docs/operator/rules-ledger-schema.md in the musubi repo.
+#
+# Oya updates this file at every cycle close — incrementing fire/catch/bypass
+# counters per rule and appending a cycle_summary entry. The framework rules
+# below are seeded with provenance and zero counters; add project-specific
+# STOP rules from your CLAUDE.md / CODEX.md under the same shape.
+
+schema_version: 1
+project: <PROJECT-SLUG>             # rename when copying into a new install
+runbook_version: "1.7"
+generated_at: <SET-AT-BOOTSTRAP>
+last_updated_at: <SET-AT-BOOTSTRAP>
+last_updated_cycle: initial-bootstrap
+
+rules:
+
+  # ─── Orchestrator-enforced mechanical guards ────────────────────────────
+
+  - id: ack-of-ack-guard
+    type: guard
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § Orchestrator-enforced guards"
+    citation_pattern: "ack-of-ack"
+    provenance:
+      added_in_runbook_version: "1.7"
+      added_on: 2026-05-14
+      added_reason: |
+        Three-way external review surfaced the "two agents acknowledging each
+        other's idleness" pattern. Orchestrator refuses a 3rd consecutive
+        idle-state relay.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: capsule-staleness-guard
+    type: guard
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § Orchestrator-enforced guards"
+    citation_pattern: "capsule-staleness"
+    provenance:
+      added_in_runbook_version: "1.7"
+      added_on: 2026-05-14
+      added_reason: |
+        Mechanical enforcement of capsule-before-comms invariant. Refuses
+        Review Request / Decision / Blocker relays when capsule untouched
+        in last 2 minutes.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  # ─── Capsule discipline ─────────────────────────────────────────────────
+
+  - id: capsule-before-comms-invariant
+    type: invariant
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Current-State Capsule § The capsule-before-comms invariant"
+    citation_pattern: "capsule-before-comms"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Comms claims about state ran ahead of capsule edits, making claims
+        unverifiable. Capsule first, comms second.
+      revisions:
+        - version: "1.7"
+          date: 2026-05-14
+          note: "Now enforced mechanically by capsule-staleness-guard."
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: capsule-timestamps-from-date-u
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Current-State Capsule § Capsule timestamps must come from `date -u`"
+    citation_pattern: "date -u"
+    provenance:
+      added_in_runbook_version: "1.7"
+      added_on: 2026-05-18
+      added_reason: |
+        Oya spike caught three independent timestamp-drift instances in one
+        @OPUS session, including a v2 review-queue row stamped before the
+        v1 review it was responding to. Values from authoritative source,
+        not recall.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  # ─── Review pattern ─────────────────────────────────────────────────────
+
+  - id: findings-i-went-looking-for
+    type: discipline
+    scope: framework
+    runbook_section: 'AGENT_COLLAB_RUNBOOK.md § Review Pattern § "Findings I went looking for" block (mandatory)'
+    citation_pattern: "Findings I went looking for"
+    provenance:
+      added_in_runbook_version: "1.7"
+      added_on: 2026-05-14
+      added_reason: |
+        Three-way external review found pair reviews trended toward
+        rubber-stamps. Mandatory ≥3 specific defect classes probed for,
+        with found/not found/N/A per line.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: spot-check-on-rubber-stamps
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Review Pattern § Spot-check on rubber-stamps"
+    citation_pattern: "spot-check"
+    provenance:
+      added_in_runbook_version: "1.7"
+      added_on: 2026-05-14
+      added_reason: |
+        If review approves >50 LOC or >3 files with zero findings, third-party
+        5-min spot-check before push. Belt-and-braces for Findings block.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: bug-path-test-gate
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Review Pattern § Bug-path test gate"
+    citation_pattern: "bug-path"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Bugfix regression tests must FAIL against the OLD code. Reviewer
+        names the exact old failure the test catches.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: three-consecutive-patches-circuit-breaker
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Review Pattern § Three-consecutive-patches circuit breaker"
+    citation_pattern: "circuit breaker"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        After 3 consecutive patches to the same surface, reviewer stops
+        accepting incremental fixes and demands rewrite-from-scratch or
+        named root cause. Prevents death-by-thousand-cuts.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  # ─── Execution discipline ───────────────────────────────────────────────
+
+  - id: no-silent-idle
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Execution Protocol § No silent idle"
+    citation_pattern: "silent idle"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        10+ min on same task without code/doc change, validation, or named
+        blocker = drifting. Resume or surface the blocker.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: go-baton
+    type: mechanism
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § The GO baton"
+    citation_pattern: "GO baton"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Explicit owner / file surface / first concrete action per handoff.
+        Replaces implicit "you go now" signalling.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: proof-blocks
+    type: mechanism
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § Proof blocks"
+    citation_pattern: "proof block"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Any spawned / confirmed_running claim requires PID / terminal /
+        subagent / worktree / command + checked_at. Turns claim into
+        evidence.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: claim-hygiene
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Review Pattern § Claim hygiene"
+    citation_pattern: "claim hygiene"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Diagnoses labelled symptom / hypothesis / confirmed root cause.
+        Confirmed claims name evidence type. Prevents premature "found it."
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: detection-slice-per-cycle
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Planning Chain § Detection slice per cycle"
+    citation_pattern: "detection slice"
+    provenance:
+      added_in_runbook_version: "1.5"
+      added_on: 2026-05-08
+      added_reason: |
+        Every cycle ships a detection slice (test / script / gate / runbook
+        rule) preventing the cycle's named failure mode from recurring.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  # ─── Strategic-Oya disciplines (v0.3+) ─────────────────────────────────
+  #
+  # These rules are triggered by the scope sensor at slice-claim — not by
+  # agent citation in comms. When the sensor fires on a slice, Oya posts an
+  # @OYA Recommendation naming the discipline; the pair either produces the
+  # required artefact in the planning doc (catch) or acknowledges and proceeds
+  # (skipped). Forgiving authority — never blocks the slice.
+  #
+  # Each rule has a `skipped` counter in addition to fires/catches/bypasses.
+  # Skip patterns are tracked but not enforced; they surface at cycle close
+  # as operator-facing signals.
+
+  - id: threat-model-auth-changes
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Strategic disciplines § Threat-model auth changes"
+    citation_pattern: "threat-model-auth-changes"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        First strategic-Oya discipline. Triggered by scope sensor when a slice's
+        touched files or planning doc indicates auth-surface changes (sessions,
+        tokens, identity provider config, OAuth/OIDC/SAML, authentication
+        boundary modifications). Required artefact: STRIDE table in the
+        planning doc covering spoofing / tampering / repudiation /
+        info-disclosure / DoS / elevation-of-privilege.
+
+        Tool-choice is operator-side — gstack /cso, raw prompting, OWASP
+        checklist, vendor skill: musubi tracks the artefact, not the tool.
+        Forgiving authority: pair can skip with acknowledgement; skip is
+        logged and surfaced at cycle close.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Sensor implementation: scripts/classify-slice-disciplines.py.
+      Trigger patterns: path matches /auth/ /sessions/ /tokens/ /oauth/
+      /oidc/ /saml/ /iam/ /password/ /identity-provider/; content matches
+      authentication, authorization, session/access/refresh token, auth
+      boundary. Refine the sensor's pattern list (not this rule's name)
+      if false positives or negatives accumulate.
+
+  - id: abuse-case-named-on-new-input
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § abuse-case-named-on-new-input"
+    citation_pattern: "abuse-case-named-on-new-input"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice introduces a new external input surface
+        (route, endpoint, handler, webhook, controller). Required artefact:
+        abuse-case list in planning doc — ≥5 named cases per endpoint
+        covering oversized / malformed / injection / replay / boundary-
+        bypass with intended response. Per-discipline contract at
+        docs/operator/strategic-disciplines.md § abuse-case-named-on-new-input.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /routes/ /endpoints/ /api/ /webhooks/ /handlers/
+      /controllers/ path matches; "new endpoint", "external input",
+      "user-submitted", "abuse case" content matches.
+
+  - id: migration-has-rollback-plan
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § migration-has-rollback-plan"
+    citation_pattern: "migration-has-rollback-plan"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice modifies schema or data model (paths matching
+        /migrations/ /schema/ *.sql, prisma/schema, alembic/versions; content
+        matches ALTER TABLE, CREATE TABLE, schema change). Required artefact:
+        rollback plan with ≥3 numbered steps + ≥1 named risk (data loss /
+        lock contention / irreversible after X). Per-discipline contract
+        at docs/operator/strategic-disciplines.md § migration-has-rollback-plan.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /migrations/ /schema/ *.sql prisma/schema
+      alembic/versions path matches; "schema change", "data model migration",
+      "ALTER TABLE", "rollback plan" content matches.
+
+  - id: idempotency-on-money-handling
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § idempotency-on-money-handling"
+    citation_pattern: "idempotency-on-money-handling"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice touches payment / billing / money flow.
+        Required artefact: idempotency contract naming dedup key + storage
+        + audit log location. Reconciliation path is bonus but not required
+        (some systems delegate to vendor reconciliation). Per-discipline
+        contract at docs/operator/strategic-disciplines.md § idempotency-on-money-handling.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /payments/ /billing/ /checkout/ /invoice /stripe/
+      /square/ /paypal/ path matches; "payment", "charge", "refund",
+      "invoice", "idempotency", "reconciliation" content matches.
+
+  - id: a11y-check-on-ui-slice
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § a11y-check-on-ui-slice"
+    citation_pattern: "a11y-check-on-ui-slice"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice touches user-facing UI (.tsx/.jsx/.vue/.svelte
+        files or pages/views/components paths). Required artefact: a11y
+        check list naming ≥4 of keyboard navigation, colour contrast (WCAG
+        2.1 AA), screen-reader labels, focus states. Each named check has
+        an outcome (passed / failed / not-applicable with reason). Per-
+        discipline contract at docs/operator/strategic-disciplines.md § a11y-check-on-ui-slice.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: .tsx/.jsx/.vue/.svelte file extensions; /pages/
+      /views/ /components/ paths; "user-facing", "new page/form/flow",
+      "WCAG", "accessibility", "a11y" content matches.
+
+  - id: external-integration-failure-mode
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § external-integration-failure-mode"
+    citation_pattern: "external-integration-failure-mode"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice introduces or modifies an external/third-party
+        integration. Required artefact: failure-mode contract naming ≥3 of
+        upstream-down behaviour, retry policy, latency budget, rate-limit
+        handling. Each with specifics (not "we retry on failure" — "max 3
+        retries, exponential backoff capped at 10s"). Per-discipline contract
+        at docs/operator/strategic-disciplines.md § external-integration-failure-mode.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /integrations/ /vendors/ /clients/*-client paths;
+      "third-party API/SDK/service", "external API/service/vendor",
+      "vendor SDK", "upstream down/failure", "retry-backoff" content matches.
+
+  - id: ai-integration-design-contract
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § ai-integration-design-contract"
+    citation_pattern: "ai-integration-design-contract"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice touches AI features (LLM-backed endpoints,
+        embeddings, RAG, agents, prompt-driven flows). Required artefact:
+        AI-SPEC with at minimum 1 eval case + 1 named guardrail + 1
+        monitored production signal + model-swap blast radius note. Without
+        an eval, "does it work?" gets answered by happy-path manual testing.
+        Per-discipline contract at docs/operator/strategic-disciplines.md § ai-integration-design-contract.
+        See also IA-QUEUE.md item `ai-1` for the longer-form rationale.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /llms/ /ai/ /prompts/ /embeddings/ /rag/ /agents/
+      paths; vendor-namespaced (anthropic-*, openai-*, langchain, llamaindex,
+      cohere); LLM/prompt-engineering/embedding/RAG/AI feature content;
+      `import anthropic` / `import openai` / `from anthropic` / `from openai`
+      Python import patterns.
+
+  - id: pii-inventory-on-data-change
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § pii-inventory-on-data-change"
+    citation_pattern: "pii-inventory-on-data-change"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice modifies user-data / PII handling paths or
+        planning doc mentions PII / personal data / GDPR / data deletion.
+        Required artefact: PII inventory naming touched fields + retention
+        rule + deletion path for each. Generic "PII handled per GDPR" is
+        theatre, not catch. Per-discipline contract at
+        docs/operator/strategic-disciplines.md § pii-inventory-on-data-change.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /users/ files with code extensions; /profile/
+      /personal-data/; "PII", "personal data/information", "user data/
+      profile/account", "GDPR", "data deletion/retention" content matches.
+
+  - id: observability-on-user-facing
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § observability-on-user-facing"
+    citation_pattern: "observability-on-user-facing"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice introduces or modifies user-facing endpoints
+        (api paths or handlers). Required artefact: observability contract
+        naming at minimum structured-log fields + one metric + one SLI.
+        Alert + dashboard are bonus (some teams centralize). Per-discipline
+        contract at docs/operator/strategic-disciplines.md § observability-on-user-facing.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Trigger patterns: /api/ files with code extensions; /handlers/ paths;
+      "observability", "monitoring contract", "logging discipline",
+      "SLO", "SLI", "production monitoring" content matches.
+
+  - id: arch-sketch-before-large-slice
+    type: strategic-discipline
+    scope: framework
+    runbook_section: "docs/operator/strategic-disciplines.md § arch-sketch-before-large-slice"
+    citation_pattern: "arch-sketch-before-large-slice"
+    provenance:
+      added_in_runbook_version: "1.8"
+      added_on: 2026-05-20
+      added_reason: |
+        Triggered when a slice exceeds size threshold (>300 LOC diff OR >3
+        files touched). Only size-based discipline. Required artefact:
+        arch sketch naming module boundaries + data flow + ≥3 failure modes.
+        Test strategy is bonus. The pair's review depth is bounded by what
+        was on paper before the code. Per-discipline contract at
+        docs/operator/strategic-disciplines.md § arch-sketch-before-large-slice.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    skipped: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: |
+      Thresholds: ARCH_SKETCH_LOC_THRESHOLD = 300 and ARCH_SKETCH_FILE_THRESHOLD
+      = 3 in scripts/classify-slice-disciplines.py. Strict greater-than
+      (exactly-at threshold does not fire). Refine thresholds if patterns
+      surface in the ledger.
+
+  # ─── Project-specific STOP rules ───────────────────────────────────────
+  #
+  # Add entries for each numbered STOP rule in your CLAUDE.md / CODEX.md.
+  # Example template (uncomment + edit):
+  #
+  # - id: stop-rule-N-<short-name>
+  #   type: stop-rule
+  #   scope: project
+  #   runbook_section: "CLAUDE.md § STOP rule N — <name>"
+  #   citation_pattern: "STOP rule N"
+  #   provenance:
+  #     added_in_runbook_version: project-rule
+  #     added_on: <YYYY-MM-DD>
+  #     added_reason: |
+  #       <The incident or rationale that produced this STOP rule.>
+  #   fires: { total: 0, by_cycle: {} }
+  #   catches: { total: 0, by_class: {}, examples: [] }
+  #   bypasses: { total: 0, examples: [] }
+  #   silent_misses: { total: 0, examples: [] }
+  #   notes: ""
+
+# ─── Reviewer calibration (Brier scoring, opt-in per Review Result) ──────
+#
+# Oya populates per-reviewer entries when reviewers add Confidence: <N>%
+# to Review Result headers. Schema authority:
+# docs/operator/calibration-schema.md (in the musubi repo).
+reviewer_calibration: []
+
+# ─── Cycle-close summaries (Oya appends one per cycle close) ─────────────
+cycle_summary: []

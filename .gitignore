@@ -1,0 +1,66 @@
+# musubi — .gitignore
+
+# User config — contains project paths specific to your machine
+# Use musubi.toml.example as the shareable template
+musubi.toml
+
+# Virtual environment
+.venv/
+
+# Per-user Claude Code workspace (agent defs, hooks, GSD config)
+# Contains user-specific absolute paths; not shipped with musubi.
+.claude/
+
+# Per-user Codex CLI workspace (agent defs, hook scripts, hooks.json)
+# Contains user-specific absolute paths; not shipped with musubi.
+.codex/
+
+# Per-user agent skills (e.g. Codex source-command skills)
+# Machine-local; not shipped with musubi.
+.agents/
+
+# Personal planning + codebase analysis scratchpad (e.g. /gsd:map-codebase output)
+.planning/
+
+# Author's internal working notes — IA queue, design drafts, spike prompts.
+# Kept locally for the author's own use; not part of the shipped product.
+# Public-facing equivalents live in docs/agents/ and docs/positioning/.
+docs/operator/internal/
+
+# Internal strategy sketches + maintainer release-prep — anonymised, but
+# roadmap/positioning notes that aren't for public consumption.
+docs/positioning/v0.3-strategic-visual-sketch.md
+docs/positioning/receipts-first-skeptic-sketch.md
+docs/operator/github-repo-metadata.md
+
+# Active comms transcript — gitignored; archive committed copies to docs/agents/archive/
+docs/agents/comms/
+
+# oyakata-2 PreToolUse decision audit trail — per-session/per-cycle, machine-local.
+# Operators should mirror this entry in their project's .gitignore (the hook
+# writes to docs/agents/oyakata-decisions.md relative to the project root).
+docs/agents/oyakata-decisions.md
+
+# oyakata-2 slice 3 (tier-2) pending-decision request/verdict files. Per-call,
+# ephemeral (deleted by the hook after verdict consumption). Operators should
+# mirror this entry in their project's .gitignore.
+docs/agents/oyakata-pending/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# upgrade_project.py auto-backups (timestamped; safe to delete after verifying upgrade)
+*.backup-*

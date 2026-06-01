@@ -1,0 +1,6 @@
+# AGENTS.md
+
+Project rules for Codex (and any other agent that reads `AGENTS.md`). Read this file on every session start before any work.
+
+<!-- Project-specific rules above this line. The musubi block below is managed by bootstrap.sh. -->
+
