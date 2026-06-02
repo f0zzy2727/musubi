@@ -71,11 +71,15 @@ done
 ORCHESTRATOR_DIR="$(cd "$(dirname "$0")" && pwd)"  # always relative to script location
 VENV_PATH="$ORCHESTRATOR_DIR/.venv"
 REQUIREMENTS="$ORCHESTRATOR_DIR/requirements.txt"
-# POSITIONAL is 0-indexed: [0] = config path, [1] = session name.
-# (Earlier this read [1]/[2], which silently dropped the config-path arg —
-# `./launch_musubi.sh /path/to/musubi.toml session` loaded the default config.)
-CONFIG="${POSITIONAL[0]:-musubi.toml}"
-SESSION="${POSITIONAL[1]:-musubi}"
+# Read positionals via `set --` so indexing is identical under zsh and bash.
+# This file's shebang is zsh, whose arrays are 1-based — an earlier 0-based
+# `${POSITIONAL[0]}` silently broke it: [0] was empty (so CONFIG fell back to
+# the default musubi.toml, loading the WRONG project) and [1] held the config
+# path (so it landed in SESSION and tmux rejected the periods). Positional
+# parameters $1/$2 after `set --` are 1-based and identical across both shells.
+set -- "${POSITIONAL[@]}"
+CONFIG="${1:-musubi.toml}"
+SESSION="${2:-musubi}"
 
 # --- cwd defence (orch-6) ---
 # Catch stale-handle / iCloud-sync failure mode BEFORE we spawn any Node-based

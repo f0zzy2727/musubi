@@ -51,6 +51,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`launch_musubi.sh` arg parsing under zsh (regression).** The macOS/iTerm
+  launcher has a `#!/bin/zsh` shebang but read positionals with bash-style
+  0-based indexing (`${POSITIONAL[0]}` / `[1]`). zsh arrays are 1-based, so
+  `[0]` was empty — `CONFIG` silently fell back to the default `musubi.toml`
+  (loading the *wrong* project) and the real config path landed in `SESSION`,
+  where tmux rejected it (`BadSessionName: contains periods`). Now reads via
+  `set -- "${POSITIONAL[@]}"` and `$1`/`$2`, which are 1-based and identical
+  across zsh and bash. The bash launcher (`launch_musubi_tmux.sh`) was already
+  correct and is unchanged. Introduced when the earlier index fix (correct for
+  the bash launcher) was applied to the zsh launcher too.
 - **Mouse-scroll no longer traps a pane in a scroll lock.** Builds on the
   `escape-time` fix below. New `scripts/tmux-copymode.conf` (sourced by the
   orchestrator right after `set -g mouse on`) does two things: (1) routes the
