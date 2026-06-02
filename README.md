@@ -545,9 +545,37 @@ Default musubi is a two-agent pair (Opus + Coda). Some projects benefit from a *
 
 **What Oya does:** the orchestrator relays every comms message and every capsule edit to her pane. She builds context across events and, when a judgement-shaped pattern warrants it (a review that didn't probe specific defect classes, a planning doc whose factual claims don't match the repo, a stale capsule, a drift across multiple messages the pair can't see from inside), she posts an `@OYA` message to the comms file. The pair treats `@OYA` messages with `@LEAD`-equivalent weight for direction. Oya does not waive STOP rules — only `@LEAD` (the operator) can.
 
+### Prerequisite: give Oya a north-star
+
+**Oya's first duty is custody of the vision — and she cannot guard a vision she cannot see.** Before she watches a single cycle, she reads your project's vision / architecture / roadmap docs to build a picture of where the project is *trying to go*, not just how it's currently coded. Without them she falls back to watching only the code, and on turn one she'll stop and ask you to point her at the north-star. So have these in place before you enable her.
+
+On startup she auto-discovers the recognised filenames (read every one that's present, all relative to your project root):
+
+| Kind | Recognised paths |
+|---|---|
+| Vision / brief | `docs/PRODUCT-VISION.md`, `docs/VISION.md`, `docs/PRD.md`, `PRD.md`, `README.md` |
+| Architecture / decisions | `docs/ARCHITECTURE.md`, ADRs under `docs/adr/` or `docs/architecture/` |
+| Roadmap / backlog | `docs/ROADMAP.md`, `docs/BACKLOG.md` |
+
+**If you already have these docs** (under any of the names above), you're done — Oya finds them. **If they live under non-standard names**, list them explicitly via `context_docs` in the `[agents.oyakata]` block so she reads *your* docs rather than guessing:
+
+```toml
+context_docs = ["docs/product-brief.md", "docs/tech-design.md", "docs/plan.md"]
+```
+
+**If you're starting from nothing**, copy the starter stubs and fill them in (a short, honest page Oya can hold in view beats a spec nobody reads):
+
+```bash
+cp templates/VISION.md templates/ROADMAP.md templates/ARCHITECTURE.md /path/to/your/project/docs/
+```
+
+These stubs are project-owned — copy once and edit freely; musubi never refreshes or overwrites them.
+
+`scripts/doctor.sh` checks this for you: when Oya is enabled, it WARNs if no vision/architecture/roadmap docs are found (or if a `context_docs` path is missing), so you catch it before launch rather than on Oya's turn one.
+
 ### To enable
 
-1. **Uncomment the `[agents.oyakata]` block in `musubi.toml`.** Set `enabled = true`. See `musubi.toml.example` for the template.
+1. **Uncomment the `[agents.oyakata]` block in `musubi.toml`.** Set `enabled = true`. See `musubi.toml.example` for the template — including the optional `context_docs` knob described in the prerequisite above.
 2. **Paste the optional Oya block into your project's `CLAUDE.md` and `AGENTS.md`.** Sources at [`templates/musubi-oya-block-claude.md`](templates/musubi-oya-block-claude.md) and [`templates/musubi-oya-block-agents.md`](templates/musubi-oya-block-agents.md). Tells the pair (Opus + Coda) what `@OYA` messages mean, how to handle `@OYA`-relayed gate waivers, and the optional `Confidence: <N>%` opt-in for Brier-scored review calibration. Both blocks are project-owned (not bootstrap-managed) — paste once and edit freely.
 3. **Run musubi as normal:**
    ```bash

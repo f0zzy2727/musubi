@@ -18,6 +18,8 @@
 #   - python3 >= 3.11
 #   - project.path from musubi.toml exists and is enterable
 #   - musubi.toml present and parseable (WARN if only the .example exists)
+#   - when the Oya layer is enabled: that the project has vision/architecture/
+#     roadmap docs for Oya to anchor on (WARN only — she degrades gracefully)
 #
 # Style mirrors scripts/cwd-preflight.sh and scripts/guard-staged-scope.sh:
 # set -euo pipefail, plain echo reporting, no external config beyond
@@ -242,6 +244,58 @@ if [ "$toml_ok" -eq 1 ] && [ -f "$TOML" ]; then
   fi
 else
   warn "skipping project.path check (musubi.toml not available)"
+fi
+
+# ---------------------------------------------------------------------------
+# Oya north-star docs — only when the third-agent layer is enabled.
+# Oya custodians the vision; without vision/architecture/roadmap docs she
+# falls back to README and stops on turn one to ask. WARN (not FAIL): she
+# degrades gracefully, but it is avoidable friction.
+# ---------------------------------------------------------------------------
+oya_enabled=""
+[ -f "$TOML" ] && oya_enabled="$(toml_value 'agents.oyakata' 'enabled' "$TOML")"
+if [ "$oya_enabled" = "true" ]; then
+  if [ -n "${proj_path:-}" ] && [ -d "${proj_path:-}" ]; then
+    # Operator-specified docs take precedence over auto-discovery.
+    ctx_raw="$(toml_value 'agents.oyakata' 'context_docs' "$TOML")"
+    if [ -n "$ctx_raw" ] && [ "$ctx_raw" != "[]" ]; then
+      ctx_paths="$(printf '%s\n' "$ctx_raw" | grep -oE '"[^"]*"|'\''[^'\'']*'\''' | tr -d '"'\' || true)"
+      missing=""; found_ctx=0
+      for p in $ctx_paths; do
+        found_ctx=1
+        [ -e "$proj_path/$p" ] || missing="$missing $p"
+      done
+      if [ "$found_ctx" -eq 1 ] && [ -z "$missing" ]; then
+        pass "Oya enabled: context_docs all present in project"
+      elif [ -n "$missing" ]; then
+        warn "Oya enabled: context_docs listed but missing in project:$missing
+        fix: create the file(s) under $proj_path, or correct the paths in [agents.oyakata].context_docs."
+      fi
+    else
+      # No explicit context_docs — check the auto-discovered recognised docs.
+      # README.md is deliberately excluded: Oya treats it only as a weak fallback.
+      found=""
+      for rel in docs/PRODUCT-VISION.md docs/VISION.md docs/PRD.md PRD.md \
+                 docs/ARCHITECTURE.md docs/ROADMAP.md docs/BACKLOG.md; do
+        [ -f "$proj_path/$rel" ] && found="$found $rel"
+      done
+      for d in docs/adr docs/architecture; do
+        if [ -d "$proj_path/$d" ] && [ -n "$(ls -A "$proj_path/$d" 2>/dev/null || true)" ]; then
+          found="$found $d/"
+        fi
+      done
+      if [ -n "$found" ]; then
+        pass "Oya enabled: north-star docs found ($found )"
+      else
+        warn "Oya enabled but no vision/architecture/roadmap docs found in project
+        impact: Oya falls back to README.md (weak) and will stop on turn one to ask for a north-star.
+        fix: add the docs (cp templates/VISION.md templates/ROADMAP.md templates/ARCHITECTURE.md \"$proj_path/docs/\"),
+             or point [agents.oyakata].context_docs at your existing docs. See README: \"Prerequisite: give Oya a north-star\"."
+      fi
+    fi
+  else
+    warn "Oya enabled but project.path unavailable — cannot check for north-star docs"
+  fi
 fi
 
 echo "==============================="

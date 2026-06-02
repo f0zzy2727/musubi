@@ -6,6 +6,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Oya north-star docs are now a first-class, documented prerequisite.** Oya's
+  first duty is custody of the vision, and she can't guard a vision she can't
+  see — but the setup path never said so. Three additions close that gap:
+  (1) starter stubs `templates/VISION.md`, `templates/ROADMAP.md`,
+  `templates/ARCHITECTURE.md`, each shaped so Oya can read it as a north-star
+  (copy into your project's `docs/` and fill in; project-owned, never
+  refreshed); (2) a new README section **"Prerequisite: give Oya a north-star"**
+  listing the recognised filenames, the `context_docs` knob for non-standard
+  names, and the copy command; (3) `scripts/doctor.sh` now WARNs, when the Oya
+  layer is enabled, if the project has no vision/architecture/roadmap docs (or a
+  `context_docs` path is missing) — so you catch it before launch rather than on
+  Oya's turn one. The check is silent when Oya is disabled, and never FAILs (she
+  degrades gracefully by asking on turn one). Tied to Oya enablement only —
+  pair-only projects are unaffected; base `bootstrap.sh` is unchanged.
+
 ### Security
 
 - **Permission auto-approver hardened (opt-in feature; default off).** Two holes
