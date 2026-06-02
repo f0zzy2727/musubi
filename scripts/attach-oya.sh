@@ -5,7 +5,7 @@
 # This is the pane-attach helper for the Oya v0.1 active-mode third agent.
 # It assumes musubi is already running (started by launch_musubi.sh or
 # launch_musubi_tmux.sh). It polls for the tmux session, adds a top pane
-# running `claude --model sonnet`, copies the Oya prompt to the clipboard,
+# running `claude --model opus`, copies the Oya prompt to the clipboard,
 # and prints next-step instructions.
 #
 # Normal usage is via the main launcher:
@@ -245,7 +245,7 @@ log "wrote scoped Oya permissions to $OYA_CLAUDE_DIR/settings.local.json"
 
 # --- Step 6: add Oya pane (idempotent) ----------------------------
 if [ "$OYAKATA_EXISTED" -eq 0 ]; then
-  log "adding Oya pane (top, full-width, ~${OYA_PANE_HEIGHT}% height) running claude --model sonnet ..."
+  log "adding Oya pane (top, full-width, ~${OYA_PANE_HEIGHT}% height) running claude --model opus ..."
   # split-window flags:
   #   -b  before (above when paired with -v)
   #   -v  vertical split (one pane above the other)
@@ -259,13 +259,15 @@ if [ "$OYAKATA_EXISTED" -eq 0 ]; then
   #            ALSO: .claude/settings.local.json in this dir pre-approves her
   #            startup-tool set (see Step 5 above).
   #   -P -F    print pane_id of the newly-created pane
-  # Claude Code 2.1+ accepts `--model sonnet` as an alias for the latest Sonnet
-  # — cheaper and faster than Opus for the observe-and-decide role, no quality
-  # loss for this task. Falls back to -p NN syntax on tmux < 2.4.
+  # Claude Code 2.1+ accepts `--model opus` as an alias for the latest Opus
+  # (currently Opus 4.8). Oya runs on Opus because the supervisor role is
+  # judgement-heavy — vision/architecture custody and engineering-discipline
+  # refereeing benefit from the strongest reasoning, not the cheapest. Falls
+  # back to -p NN syntax on tmux < 2.4.
   oyakata_id=$(tmux split-window -t "$SESSION":0.0 -bvf -l "${OYA_PANE_HEIGHT}%" -c "$oyakata_cwd" \
-                                 -P -F "#{pane_id}" "claude --model sonnet" 2>/dev/null \
+                                 -P -F "#{pane_id}" "claude --model opus" 2>/dev/null \
               || tmux split-window -t "$SESSION":0.0 -bvf -p "$OYA_PANE_HEIGHT" -c "$oyakata_cwd" \
-                                   -P -F "#{pane_id}" "claude --model sonnet")
+                                   -P -F "#{pane_id}" "claude --model opus")
   # Give claude's TUI time to fully boot (banner draw, .claude/settings.local.json
   # load, ready-to-receive-input). Too short and the paste-buffer below races
   # against the TUI init and the prompt is lost.
@@ -277,7 +279,7 @@ if [ "$OYAKATA_EXISTED" -eq 0 ]; then
       && log "Oya pane tinted ($OYA_TINT_BG)" \
       || log "Oya pane tint skipped (tmux rejected bg style)"
   fi
-  log "Oya pane created: $oyakata_id (model: sonnet; cwd: $oyakata_cwd)"
+  log "Oya pane created: $oyakata_id (model: opus; cwd: $oyakata_cwd)"
   FRESH_OYA=1
 else
   existing_id=$(echo "$all_panes_titled" | grep "OYAKATA" | awk '{print $1}')

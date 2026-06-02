@@ -23,8 +23,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to `false`; the adopting operator must explicitly enable it. 10 new regression
   tests; suite now 400+ passing.
 
+### Changed
+
+- **Oya runs on Opus, not Sonnet.** The optional supervisor pane
+  (`scripts/attach-oya.sh`) now launches `claude --model opus` (the alias for the
+  latest Opus). The supervisor role is judgement-heavy — vision/architecture
+  custody and engineering-discipline refereeing — so it runs on the strongest
+  reasoning rather than the cheapest model. Note: an always-on Opus observer
+  costs more per cycle than Sonnet did.
+
 ### Fixed
 
+- **Mouse-scroll no longer traps a pane in a scroll lock.** Builds on the
+  `escape-time` fix below. New `scripts/tmux-copymode.conf` (sourced by the
+  orchestrator right after `set -g mouse on`) does two things: (1) routes the
+  wheel to tmux's own copy-mode and never forwards it to the agent CLI, so an
+  agent's full-width scrollback pager (the `(jump to forward)` bar that appears
+  when an agent has mouse reporting on) can no longer be triggered by scrolling;
+  (2) makes a left-click / `Enter` / `q` cancel copy-mode on the first try and
+  focus the clicked pane, defeating the trackpad-momentum re-entry that made you
+  mash keys to escape.
 - **`launch_musubi.sh` honours its config-path + session-name arguments.** The
   positional parse read array indices `[1]`/`[2]` instead of `[0]`/`[1]`, so
   `./launch_musubi.sh /path/to/musubi.toml <session>` silently loaded the default

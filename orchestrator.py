@@ -1450,6 +1450,23 @@ def start_musubi(config_path="musubi.toml", session_override=None):
     # (Scroll-to-bottom already auto-exits via tmux's default `copy-mode -e`
     # wheel binding, so a stray scroll doesn't strand you.)
     session.cmd('set', '-sg', 'escape-time', '10')
+    # escape-time alone isn't enough when trackpad momentum keeps re-entering
+    # copy-mode faster than you can press Escape (you end up mashing Enter to get
+    # out). scripts/tmux-copymode.conf adds bindings so a left-click / Enter / q
+    # cancels copy-mode on the first try and focuses the clicked pane — see that
+    # file for the full rationale. Passing the chained `select-pane \; cancel`
+    # binding through session.cmd() argv doesn't work (tmux splits on the `;`),
+    # so we source it as a snippet instead.
+    _copymode_conf = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "scripts", "tmux-copymode.conf"
+    )
+    if os.path.exists(_copymode_conf):
+        try:
+            session.cmd('source-file', _copymode_conf)
+        except Exception as e:
+            _log("BOOT", f"copy-mode hardening skipped: {e!r}")
+    else:
+        _log("BOOT", f"copy-mode hardening skipped: {_copymode_conf} not found")
 
     window = session.active_window
     p_claude = window.active_pane

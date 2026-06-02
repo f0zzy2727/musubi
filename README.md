@@ -558,7 +558,7 @@ Default musubi is a two-agent pair (Opus + Coda). Some projects benefit from a *
 
 ### What `attach-oya.sh` does on your behalf
 
-- Splits a third tmux pane (top, ~30% height, full width) running `claude --model sonnet`.
+- Splits a third tmux pane (top, ~30% height, full width) running `claude --model opus`.
 - Writes a scoped `docs/operator/.claude/settings.local.json` into the musubi repo so Oya's startup tools (Read on project + musubi files, Edit on her log + comms, Bash on read-only commands like `tmux capture-pane` / `date` / `cat` / `grep`) are pre-approved. The file is gitignored — it doesn't ship with the repo.
 - Auto-pastes the Oya v0.1 prompt (with `<PROJECT_PATH>` and `<MUSUBI_ROOT>` placeholders substituted to absolute paths) into the new pane and submits it. Also copies the prompt to your clipboard as a Cmd+V fallback.
 
@@ -731,10 +731,10 @@ You stripped the `<!-- musubi-managed -->` marker from one of the managed docs. 
 ### Oya-specific
 
 **Oya pane never appears (only two panes after launch)**
-Check the orchestrator's log stream for `[OYA] agents.oyakata.enabled = true — spawning Oya …`. If absent, your musubi.toml doesn't have the `[agents.oyakata]` block uncommented + `enabled = true`. If present but no `[OYA] pane discovered: %N` follows within ~30s, check the `[ATTACH] ...` lines for the actual failure (most often `claude --model sonnet` not on PATH, or `pbcopy` missing on Linux).
+Check the orchestrator's log stream for `[OYA] agents.oyakata.enabled = true — spawning Oya …`. If absent, your musubi.toml doesn't have the `[agents.oyakata]` block uncommented + `enabled = true`. If present but no `[OYA] pane discovered: %N` follows within ~30s, check the `[ATTACH] ...` lines for the actual failure (most often `claude --model opus` not on PATH, or `pbcopy` missing on Linux).
 
 **`claude: command not found` from Oya pane**
-The Oya pane runs `claude --model sonnet`. The `claude` CLI must be on PATH for the shell tmux launches with. `npm install -g @anthropic-ai/claude-code` if needed, then restart musubi.
+The Oya pane runs `claude --model opus`. The `claude` CLI must be on PATH for the shell tmux launches with. `npm install -g @anthropic-ai/claude-code` if needed, then restart musubi.
 
 **No clipboard tool found (Oya auto-paste falls back to tmux only)**
 `scripts/attach-oya.sh` probes for a clipboard tool in order — `pbcopy` (macOS), `wl-copy` (Wayland), `xclip` / `xsel` (X11), `clip.exe` (WSL) — and soft-fails if none is present (Oya still attaches; only the Cmd+V clipboard fallback is unavailable, the tmux paste path still works). On a headless Linux box with none installed, `sudo apt-get install xclip` (or `wl-clipboard`) restores it.
