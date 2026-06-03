@@ -350,6 +350,78 @@ def capsule_is_stale(cfg, now=None):
 
 
 # ---------------------------------------------------------------------------
+# Operator-action surface (the operator-actions capsule)
+# ---------------------------------------------------------------------------
+# Oya writes a *pending* item here whenever she needs the operator to make a
+# bounded decision / take an action before work can proceed (set a stop,
+# approve a deploy, choose A vs B). The orchestrator surfaces these on a
+# non-scrolling surface (tmux status bar) + a desktop notification, so a
+# needed decision can't get buried in pane scroll the way a comms line does.
+#
+# The file is a *capsule* — a snapshot of what's still outstanding for the
+# operator — not a log. Pending = unchecked markdown checkboxes; once the
+# operator discharges an item Oya ticks the box (moves it to Resolved). These
+# parse helpers are pure so the watcher logic stays testable without tmux.
+
+# A pending action is a top-level (≤3 leading spaces) unchecked checkbox item.
+# Deeper indentation is treated as continuation detail, not a separate action.
+_ACTION_PENDING_RE = re.compile(r'^[ \t]{0,3}[-*]\s+\[ \]\s+(.+?)\s*$', re.MULTILINE)
+
+# Metadata separators that trail the imperative headline (" — _asked …_").
+# Split on the first one to get a clean status-bar summary.
+_ACTION_META_SEPARATORS = (" — ", " – ", " -- ", " - ")
+
+
+def _action_key(headline):
+    """Stable identity for a pending action: the headline with markdown bold
+    stripped and whitespace collapsed. Used to tell a genuinely-new action
+    (fire a notification) from one already outstanding (just keep it pinned)."""
+    return re.sub(r'\s+', ' ', headline.replace("**", "").strip())
+
+
+def _action_summary(headline):
+    """Short, human-facing form of the headline for the status bar: bold
+    stripped, trailing `— _asked …_` metadata dropped."""
+    s = headline.replace("**", "").strip()
+    for sep in _ACTION_META_SEPARATORS:
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+            break
+    return s
+
+
+def parse_operator_actions(text):
+    """Parse the operator-actions capsule body into a list of pending actions,
+    in document order. Each item is a dict: {key, summary, headline}.
+
+    Pending = top-level unchecked `- [ ]` / `* [ ]` checkbox items. Resolved
+    (`- [x]`) items are intentionally excluded — the capsule's job is to show
+    only what's still waiting on the operator."""
+    actions = []
+    for m in _ACTION_PENDING_RE.finditer(text):
+        headline = m.group(1)
+        actions.append({
+            "key": _action_key(headline),
+            "summary": _action_summary(headline),
+            "headline": headline.strip(),
+        })
+    return actions
+
+
+def format_actions_status(pending):
+    """Build the tmux status-bar string for the current outstanding actions.
+    Empty list → "" (clears the pin). One action → its summary; several → a
+    count plus the first summary so the operator sees there's a queue."""
+    if not pending:
+        return ""
+    head = pending[0]["summary"]
+    n = len(pending)
+    if n == 1:
+        return f"⚑ AWAITING YOU: {head}"
+    return f"⚑ {n} AWAITING YOU: {head} (+{n - 1} more)"
+
+
+# ---------------------------------------------------------------------------
 # Sender detection (canonical form)
 # ---------------------------------------------------------------------------
 

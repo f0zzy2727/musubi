@@ -35,6 +35,8 @@ from comms import (
     capsule_is_stale,
     CAPSULE_FRESHNESS_WINDOW_SECONDS,
     detect_sender,
+    parse_operator_actions,
+    format_actions_status,
 )
 
 # Oyakata (Oya) — optional third-agent supervisor layer in oyakata.py.
@@ -51,6 +53,8 @@ from oyakata import (
     spawn_oya_if_enabled,
     auto_wire_pretooluse_hook,
     flag_disciplines_to_oyakata,
+    operator_actions_enabled,
+    resolve_operator_actions_path,
 )
 
 
@@ -68,6 +72,7 @@ def ts():
 #   BRIEF    — agent briefing
 #   OYA      — Oya pane spawn / pane-discovery (handoff to attach-oya.sh)
 #   WATCHER  — main relay watcher
+#   ACTION   — operator-action surface (Oya needs a decision from the human)
 # ---------------------------------------------------------------------------
 
 def _log(component, message):
@@ -784,6 +789,71 @@ def send_message(pane, message, cfg=None):
     time.sleep(pause)
     pane.send_keys('', enter=True)
 
+
+# ---------------------------------------------------------------------------
+# Operator-action surface — summon the human off the firehose
+# ---------------------------------------------------------------------------
+# When Oya needs a bounded decision/action from the operator, she writes it to
+# the operator-actions capsule. The human can't be `send_keys`'d, so delivery
+# to them is an *interrupt*, not a paste: a desktop notification (pull them
+# even from another app) + a pin on the tmux status bar (the one surface that
+# doesn't scroll with the panes, so the ask can't get buried like a comms
+# line). Both are best-effort — a missing notifier or a status-bar quirk must
+# never break the relay watcher.
+
+def notify_operator(title, message):
+    """Best-effort desktop notification to summon the operator. macOS only
+    (osascript); silently no-ops on other platforms or any failure."""
+    if sys.platform != "darwin":
+        return
+    try:
+        safe_msg = message.replace('"', "'")[:200]
+        safe_title = title.replace('"', "'")[:80]
+        subprocess.run(
+            ["osascript", "-e",
+             f'display notification "{safe_msg}" with title "{safe_title}" '
+             f'sound name "Glass"'],
+            capture_output=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def set_actions_statusbar(session, status_text):
+    """Pin (or clear) the operator-actions indicator in the tmux status bar.
+
+    status-right is set session-scoped (no `-g`) so we never touch the user's
+    global tmux config. An empty `status_text` clears the pin. Best-effort —
+    never raises into the watcher loop."""
+    if session is None:
+        return
+    try:
+        session.cmd("set-option", "status-right-length", "120")
+        session.cmd("set-option", "status-right", status_text or "")
+        if status_text:
+            # Make sure the bar is visible while something is outstanding.
+            session.cmd("set-option", "status", "on")
+    except Exception:
+        pass
+
+
+def emit_action_banner(new_items, total_pending):
+    """Print a prominent block to the launcher stream when new operator actions
+    land, so the calm orchestrator terminal mirrors the status-bar pin. Rings
+    the terminal bell once for the batch."""
+    bar = "─" * 60
+    try:
+        sys.stdout.write("\a")  # terminal bell
+    except Exception:
+        pass
+    print(f"\n{bar}")
+    print(f"  ⚑ ACTION NEEDED FROM YOU ({total_pending} outstanding)")
+    for a in new_items:
+        print(f"    • {a['summary']}")
+    print("  → reply to Oya in her pane to discharge it")
+    print(f"{bar}\n", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Relay
 # ---------------------------------------------------------------------------
@@ -911,6 +981,29 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
     tier2_seen_request_ids: set = set()
     tier2_permissions_enabled = oyakata_permissions_enabled(cfg)
 
+    # Operator-action surface. Oya writes a pending item to the operator-actions
+    # capsule when she needs a bounded decision from the human; we watch its
+    # mtime (same pattern as the capsule-edit watcher) and, on change, pin the
+    # outstanding asks to the tmux status bar + notify on genuinely-new ones.
+    # The file is a state snapshot, not a log — parsed fresh on every change.
+    oa_active = operator_actions_enabled(cfg) and session is not None
+    oa_path = resolve_operator_actions_path(cfg) if oa_active else None
+    oa_seen_keys: set = set()
+    oa_last_mtime = 0
+    if oa_active:
+        try:
+            oa_last_mtime = os.path.getmtime(oa_path)
+            with open(oa_path, encoding="utf-8") as f:
+                existing = parse_operator_actions(f.read())
+        except FileNotFoundError:
+            existing = []
+        # Prime seen-keys + the pin from any already-outstanding actions so a
+        # re-attach shows the pin but does NOT re-notify for old asks.
+        oa_seen_keys = {a["key"] for a in existing}
+        set_actions_statusbar(session, format_actions_status(existing))
+        print(f"[{ts()}] [ACTION] operator-action surface active — watching "
+              f"{oa_path} ({len(existing)} outstanding)")
+
     # Mid-session staleness detection (orch-3 mitigation 2). Capture the
     # orchestrator repo's HEAD at startup and re-check periodically; warn once
     # if it advances, because code/config changes don't take effect until the
@@ -972,6 +1065,32 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                         last_oya_log_mtime = cur_oya_log_mtime
                 except FileNotFoundError:
                     pass
+
+            # Operator-action surface: when the operator-actions capsule
+            # changes, re-pin the outstanding asks to the status bar and fire a
+            # desktop notification for any item that wasn't outstanding before.
+            # Resolving an item (Oya ticks the box) drops it from `pending`, so
+            # the pin clears itself when nothing is left waiting on the human.
+            if oa_active:
+                try:
+                    cur_oa_mtime = os.path.getmtime(oa_path)
+                except FileNotFoundError:
+                    cur_oa_mtime = 0
+                if cur_oa_mtime != oa_last_mtime:
+                    oa_last_mtime = cur_oa_mtime
+                    try:
+                        with open(oa_path, encoding="utf-8") as f:
+                            pending = parse_operator_actions(f.read())
+                    except FileNotFoundError:
+                        pending = []
+                    new_items = [a for a in pending if a["key"] not in oa_seen_keys]
+                    for a in new_items:
+                        _log("ACTION", f"Oya needs you: {a['summary']}")
+                        notify_operator("musubi — action needed", a["summary"])
+                    if new_items:
+                        emit_action_banner(new_items, len(pending))
+                    oa_seen_keys |= {a["key"] for a in pending}
+                    set_actions_statusbar(session, format_actions_status(pending))
 
             # Tier-2 pending-decision relay (oyakata-2 slice 3).
             # Hook writes a request file when a tool call falls outside the

@@ -218,6 +218,8 @@ cat > "$OYA_CLAUDE_DIR/settings.local.json" <<JSON
       "Read($MUSUBI_ROOT/**)",
       "Edit($TARGET/docs/agents/oyakata-log.md)",
       "Edit($TARGET/docs/agents/comms/active.txt)",
+      "Edit($TARGET/docs/agents/operator-actions.md)",
+      "Write($TARGET/docs/agents/operator-actions.md)",
       "Edit($TARGET/docs/agents/asymmetry/**)",
       "Edit($TARGET/docs/agents/rules-ledger.yml)",
       "Edit($TARGET/docs/agents/shadow-review/**)",

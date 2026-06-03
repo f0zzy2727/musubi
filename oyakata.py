@@ -42,6 +42,30 @@ def oyakata_permissions_enabled(cfg):
     )
 
 
+def operator_actions_enabled(cfg):
+    """True when Oya is enabled AND the operator-action surface is on.
+
+    Defaults ON when Oya is enabled: the surface is the operator's pinned
+    "what's waiting on me" view, and the failure mode it fixes (a needed
+    decision buried in pane scroll) is exactly what the third agent exists to
+    prevent. Opt out with `[agents.oyakata].operator_actions = false`."""
+    if not oyakata_enabled(cfg):
+        return False
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    return bool(oya.get("operator_actions", True))
+
+
+def resolve_operator_actions_path(cfg):
+    """Absolute path to the operator-actions capsule. Relative paths resolve
+    against project.path — same convention as the comms capsule, so the
+    orchestrator and Oya agree on one location."""
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    rel = oya.get("operator_actions_path", "docs/agents/operator-actions.md")
+    if os.path.isabs(rel):
+        return rel
+    return os.path.join(cfg.get("project", {}).get("path", "."), rel)
+
+
 # Path-substring marker used to identify musubi-managed PreToolUse entries
 # in the project's `.claude/settings.local.json`. The auto-wirer locates
 # entries to update vs append by looking for this token in the nested
