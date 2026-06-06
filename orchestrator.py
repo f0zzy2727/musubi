@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import sys
+from collections import deque
 try:
     import tomllib  # Python 3.11+ stdlib
 except ModuleNotFoundError:  # pragma: no cover - 3.10 and earlier
@@ -35,6 +36,7 @@ from comms import (
     capsule_is_stale,
     CAPSULE_FRESHNESS_WINDOW_SECONDS,
     detect_sender,
+    extract_messages,
     parse_operator_actions,
     format_actions_status,
     format_relay_refusal_status,
@@ -1095,7 +1097,13 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     print("Press Ctrl+C to stop.\n")
 
     last_offset = get_file_size(comms_file)
-    last_relayed_block = None
+    # Memory of recently-relayed blocks (multi-deep — the old single-block
+    # memory couldn't protect a multi-message span retry). Guards against
+    # re-delivery after a file shrink/rotation re-read and after a mid-drain
+    # failure retry. Deliberately NOT fed by guard refusals: a refused message
+    # that the agent fixes (capsule updated) and re-posts VERBATIM must relay,
+    # not vanish — field bug, 2026-06-06.
+    recently_relayed = deque(maxlen=8)
     last_size_seen = last_offset
     last_growth_time = time.time()
     nudged_at_size = None
@@ -1246,6 +1254,128 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
 
     known_handles = recognised_handles(cfg)
 
+    def _process_block(message_block):
+        """Run ONE comms message through the full relay pipeline: duplicate
+        skip → sender detection → Oya observation relay → pair-protocol
+        guards → relay to the peer. Called once per block by the drain loop;
+        a `return` here means "done with this block", never "skip the rest
+        of the span". Raises propagate to the watcher's outer handler so the
+        whole span retries with the offset untouched."""
+        nonlocal idle_streak, oya_pending_count, oya_warned_at_count
+
+        if message_block in recently_relayed:
+            print(f"[{ts()}] [WATCHER] Skipping duplicate of an already-relayed "
+                  f"message (span retry or rotation re-read).")
+            return
+
+        sender = detect_sender(message_block, cfg)
+        if not sender:
+            print(f"[{ts()}] [WATCHER] Could not detect sender — skipping.")
+            return
+
+        # Oyakata observation relay: send the parsed event to Oya BEFORE
+        # the guard checks. Oya sees every message regardless of whether
+        # the orchestrator subsequently refuses to relay it to the pair —
+        # guard-blocked events are themselves signals worth observing.
+        if oya_active and p_oyakata is not None:
+            relay_to_oyakata(message_block, sender, p_oyakata, cfg)
+            oya_pending_count += 1
+            if oya_pending_count >= oya_threshold and oya_warned_at_count != oya_pending_count:
+                print(f"[{ts()}] [WATCHER] WARNING: Oya has not written to "
+                      f"{oya_log_path} since {oya_pending_count} relays "
+                      f"(threshold {oya_threshold}). Possible backpressure "
+                      f"or quiet collection — check the Oya pane.")
+                oya_warned_at_count = oya_pending_count
+
+        # Oya is exempt from the pair-protocol guards. Her messages are
+        # Notes / Recommendations / Pauses / Escalations — not idle-result
+        # acks and not state-affecting from the runbook's perspective.
+        # Skip the guards entirely for OYAKATA-sender messages.
+        if sender == "OYAKATA":
+            relay_instruction(message_block, sender, p_claude, p_codex, cfg)
+            recently_relayed.append(message_block)
+            print(f"[{ts()}] [@OYA -> OPUS + CODA] Relayed.")
+            return
+
+        # Ack-of-ack guard: if this is the Nth consecutive idle message,
+        # refuse to relay and prompt the writer to either claim a slice
+        # or name a real blocker. Resets on any non-idle Result.
+        # NOTE: refused blocks are deliberately NOT added to the
+        # recently-relayed memory — an agent that fixes the cause and
+        # re-posts the same message verbatim must get a fresh evaluation,
+        # not a silent drop (field bug, 2026-06-06).
+        result = parse_result_field(message_block)
+        if is_idle_result(result):
+            idle_streak += 1
+            if idle_streak >= ACK_OF_ACK_LIMIT:
+                writer_pane = p_claude if sender == "OPUS" else p_codex
+                print(f"[{ts()}] [WATCHER] Ack-of-ack chain detected "
+                      f"({idle_streak} consecutive idle messages). Refusing relay.")
+                send_message(writer_pane,
+                    f"Ack-of-ack guard triggered: {idle_streak} consecutive idle messages "
+                    f"in the comms file. Refusing to relay. Either claim a slice with a "
+                    f"concrete first action, name a real blocker, or stop responding to "
+                    f"break the loop. See the runbook's Comms Protocol section.",
+                    cfg
+                )
+                # orch-8: interrupt the operator — a held relay must not
+                # hide in the scrolling watcher log.
+                _surface_refusal(
+                    "idle-streak",
+                    f"{idle_streak} consecutive idle messages — the pair is "
+                    f"acknowledging, not working. A slice claim clears it.")
+                return
+        else:
+            idle_streak = 0
+
+        # Capsule-staleness guard: state-affecting messages require the
+        # capsule to have been updated within CAPSULE_FRESHNESS_WINDOW_SECONDS,
+        # per the capsule-before-comms invariant. State-affecting covers:
+        #   - Types: Review Request / Decision / Blocker (protocol-level
+        #     state assertions)
+        #   - Results: state-transition values from the six-state vocab
+        #     (started / blocked / completed / spawned / confirmed_running)
+        #     on any Type — so an Update reporting Result=started also
+        #     triggers the guard. Refuse the relay and nudge the writer.
+        msg_type = message_type(message_block)
+        if is_state_affecting(msg_type, message_block) and capsule_is_stale(cfg):
+            cap_rel = cfg["comms"].get("capsule", "docs/agents/current-state.md")
+            writer_pane = p_claude if sender == "OPUS" else p_codex
+            print(f"[{ts()}] [WATCHER] Capsule-stale on {msg_type!r} from {sender}. Refusing relay.")
+            send_message(writer_pane,
+                f"Capsule-stale guard triggered: your {msg_type!r} message was posted "
+                f"without updating {cap_rel} in the last "
+                f"{CAPSULE_FRESHNESS_WINDOW_SECONDS // 60} minutes. Per the runbook's "
+                f"capsule-before-comms invariant, update the capsule first, then re-post.",
+                cfg
+            )
+            # orch-8: interrupt the operator — a held relay must not hide
+            # in the scrolling watcher log.
+            _surface_refusal(
+                "capsule-stale",
+                f"{msg_type or 'state-affecting message'} from {sender} held — "
+                f"the capsule ({cap_rel}) hasn't been updated. "
+                f"Capsule first, then re-post.")
+            return
+
+        relay_instruction(message_block, sender, p_claude, p_codex, cfg)
+        recently_relayed.append(message_block)
+        print(f"[{ts()}] [{sender} -> {'CODA' if sender == 'OPUS' else 'OPUS'}] Relayed.")
+        # orch-8: a normal pair relay ends any refusal episode — clear the
+        # pinned warning so the surface only ever shows live problems.
+        # (Deliberately NOT cleared on Oya relays above: she is guard-exempt,
+        # so her messages flowing says nothing about the pair being unstuck.)
+        _clear_refusals()
+
+        # A1: on a slice claim/start, auto-fire the discipline scope sensor
+        # over the receipt's declared file targets and surface any triggered
+        # engineering disciplines to Oya. Self-gates on file-target presence
+        # and Oya availability; forgiving authority (informs, never blocks).
+        if (oya_active and p_oyakata is not None and result
+                and any(s in result.lower() for s in ("claimed", "started"))):
+            flag_disciplines_to_oyakata(
+                message_block, p_oyakata, cfg, _musubi_repo_dir)
+
     while True:
         try:
             time.sleep(3)
@@ -1382,8 +1512,8 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                     print(f"[{ts()}] [WATCHER] New content but no {over} yet — still composing.")
                 continue
 
-            message_block = extract_last_message(new_content, cfg)
-            if not message_block:
+            message_blocks, consumed_chars = extract_messages(new_content, cfg)
+            if not message_blocks:
                 if unparseable_at_size != current_size:
                     # First failure on this content — print a useful diagnostic
                     # so the user can see what's actually in the file.
@@ -1447,116 +1577,25 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
             # Parse succeeded — clear any pending unparseable state.
             unparseable_at_size = None
             unparseable_retries = 0
-            last_offset = current_size
 
-            if message_block == last_relayed_block:
-                continue
-
-            sender = detect_sender(message_block, cfg)
-            if not sender:
-                print(f"[{ts()}] [WATCHER] Could not detect sender — skipping.")
-                continue
-
-            # Oyakata observation relay: send the parsed event to Oya BEFORE
-            # the guard checks. Oya sees every message regardless of whether
-            # the orchestrator subsequently refuses to relay it to the pair —
-            # guard-blocked events are themselves signals worth observing.
-            if oya_active and p_oyakata is not None:
-                relay_to_oyakata(message_block, sender, p_oyakata, cfg)
-                oya_pending_count += 1
-                if oya_pending_count >= oya_threshold and oya_warned_at_count != oya_pending_count:
-                    print(f"[{ts()}] [WATCHER] WARNING: Oya has not written to "
-                          f"{oya_log_path} since {oya_pending_count} relays "
-                          f"(threshold {oya_threshold}). Possible backpressure "
-                          f"or quiet collection — check the Oya pane.")
-                    oya_warned_at_count = oya_pending_count
-
-            # Oya is exempt from the pair-protocol guards. Her messages are
-            # Notes / Recommendations / Pauses / Escalations — not idle-result
-            # acks and not state-affecting from the runbook's perspective.
-            # Skip the guards entirely for OYAKATA-sender messages.
-            if sender == "OYAKATA":
-                last_relayed_block = message_block
-                relay_instruction(message_block, sender, p_claude, p_codex, cfg)
-                print(f"[{ts()}] [@OYA -> OPUS + CODA] Relayed.")
-                continue
-
-            # Ack-of-ack guard: if this is the Nth consecutive idle message,
-            # refuse to relay and prompt the writer to either claim a slice
-            # or name a real blocker. Resets on any non-idle Result.
-            result = parse_result_field(message_block)
-            if is_idle_result(result):
-                idle_streak += 1
-                if idle_streak >= ACK_OF_ACK_LIMIT:
-                    writer_pane = p_claude if sender == "OPUS" else p_codex
-                    print(f"[{ts()}] [WATCHER] Ack-of-ack chain detected "
-                          f"({idle_streak} consecutive idle messages). Refusing relay.")
-                    send_message(writer_pane,
-                        f"Ack-of-ack guard triggered: {idle_streak} consecutive idle messages "
-                        f"in the comms file. Refusing to relay. Either claim a slice with a "
-                        f"concrete first action, name a real blocker, or stop responding to "
-                        f"break the loop. See the runbook's Comms Protocol section.",
-                        cfg
-                    )
-                    # orch-8: interrupt the operator — a held relay must not
-                    # hide in the scrolling watcher log.
-                    _surface_refusal(
-                        "idle-streak",
-                        f"{idle_streak} consecutive idle messages — the pair is "
-                        f"acknowledging, not working. A slice claim clears it.")
-                    last_relayed_block = message_block
-                    continue
-            else:
-                idle_streak = 0
-
-            # Capsule-staleness guard: state-affecting messages require the
-            # capsule to have been updated within CAPSULE_FRESHNESS_WINDOW_SECONDS,
-            # per the capsule-before-comms invariant. State-affecting now covers:
-            #   - Types: Review Request / Decision / Blocker (protocol-level
-            #     state assertions)
-            #   - Results: state-transition values from the six-state vocab
-            #     (started / blocked / completed / spawned / confirmed_running)
-            #     on any Type — so an Update reporting Result=started also
-            #     triggers the guard. Refuse the relay and nudge the writer.
-            msg_type = message_type(message_block)
-            if is_state_affecting(msg_type, message_block) and capsule_is_stale(cfg):
-                cap_rel = cfg["comms"].get("capsule", "docs/agents/current-state.md")
-                writer_pane = p_claude if sender == "OPUS" else p_codex
-                print(f"[{ts()}] [WATCHER] Capsule-stale on {msg_type!r} from {sender}. Refusing relay.")
-                send_message(writer_pane,
-                    f"Capsule-stale guard triggered: your {msg_type!r} message was posted "
-                    f"without updating {cap_rel} in the last "
-                    f"{CAPSULE_FRESHNESS_WINDOW_SECONDS // 60} minutes. Per the runbook's "
-                    f"capsule-before-comms invariant, update the capsule first, then re-post.",
-                    cfg
-                )
-                # orch-8: interrupt the operator — a held relay must not hide
-                # in the scrolling watcher log.
-                _surface_refusal(
-                    "capsule-stale",
-                    f"{msg_type or 'state-affecting message'} from {sender} held — "
-                    f"the capsule ({cap_rel}) hasn't been updated. "
-                    f"Capsule first, then re-post.")
-                last_relayed_block = message_block
-                continue
-
-            last_relayed_block = message_block
-            relay_instruction(message_block, sender, p_claude, p_codex, cfg)
-            print(f"[{ts()}] [{sender} -> {'CODA' if sender == 'OPUS' else 'OPUS'}] Relayed.")
-            # orch-8: a normal pair relay ends any refusal episode — clear the
-            # pinned warning so the surface only ever shows live problems.
-            # (Deliberately NOT cleared on Oya relays above: she is guard-exempt,
-            # so her messages flowing says nothing about the pair being unstuck.)
-            _clear_refusals()
-
-            # A1: on a slice claim/start, auto-fire the discipline scope sensor
-            # over the receipt's declared file targets and surface any triggered
-            # engineering disciplines to Oya. Self-gates on file-target presence
-            # and Oya availability; forgiving authority (informs, never blocks).
-            if (oya_active and p_oyakata is not None and result
-                    and any(s in result.lower() for s in ("claimed", "started"))):
-                flag_disciplines_to_oyakata(
-                    message_block, p_oyakata, cfg, _musubi_repo_dir)
+            # Drain EVERY complete message in the read span, in write order.
+            # (Field bug: extracting only the LAST block dropped every earlier
+            # message whenever a fast exchange landed 2+ posts in one ~3s read
+            # window.) The offset advances only AFTER the whole span is
+            # processed — a mid-drain failure (tmux flicker, agent CLI
+            # restart) lands in the outer handler with the offset untouched,
+            # so the next tick re-reads and retries the span; already-relayed
+            # blocks are skipped by the recently-relayed memory; refused
+            # blocks are re-evaluated (worst case a duplicate nudge, never a
+            # silent drop). The advance reaches the end of the last COMPLETE
+            # block, not EOF — a still-composing partial tail stays unread
+            # until its over-signal arrives instead of being jumped over.
+            if len(message_blocks) > 1:
+                print(f"[{ts()}] [WATCHER] {len(message_blocks)} messages in "
+                      f"this read span — draining in order.")
+            for message_block in message_blocks:
+                _process_block(message_block)
+            last_offset += len(new_content[:consumed_chars].encode("utf-8"))
 
         except Exception as e:
             # Anything not handled by the inner branches lands here. The relay

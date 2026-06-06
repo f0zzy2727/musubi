@@ -176,6 +176,50 @@ def _all_configured_handles(cfg):
     return handles
 
 
+# The cosmetic separator line agents write between comms messages. Treated as
+# noise by the parser — message boundaries are defined by the over-signal, so
+# a missing or doubled separator can't merge or split messages.
+_BLOCK_SEPARATOR = "---------------------------------------------------"
+
+
+def extract_messages(new_content, cfg):
+    """All complete message blocks in `new_content`, in WRITE ORDER, plus how
+    far into the content the last complete block reaches.
+
+    Returns `(blocks, consumed_chars)`:
+      - `blocks`: list of message strings, each closed by the over-signal and
+        carrying at least one configured `[@HANDLE]` (lenient substring match,
+        same family as extract_last_message). Over-closed spans with NO
+        recognised handle are junk (TUI noise, stray pastes) and are dropped
+        from the list but still counted as consumed.
+      - `consumed_chars`: character index just past the LAST over-signal —
+        i.e. the prefix of `new_content` that has been fully accounted for.
+        Anything after it is a still-composing partial message the caller
+        must NOT skip past (field bug: the old advance-to-EOF jumped over
+        partial tails, losing the message when its over-signal arrived).
+
+    History: the predecessor returned only the LAST block of a read span, and
+    the watcher then advanced past the whole span — so whenever two or more
+    messages landed in one ~3s read window (a normal fast pair exchange),
+    every message but the last was silently dropped. Field-diagnosed
+    2026-06-06 on a second operator's deployment (independently root-caused
+    by the deployment's own Oya, who reached the same two defects)."""
+    over_re = over_pattern(cfg["comms"]["over_signal"])
+    handles = _all_configured_handles(cfg)
+
+    blocks = []
+    consumed_chars = 0
+    prev_end = 0
+    for m in over_re.finditer(new_content):
+        raw = new_content[prev_end:m.end()]
+        prev_end = m.end()
+        consumed_chars = m.end()
+        block = raw.replace(_BLOCK_SEPARATOR, "").strip()
+        if block and any(h in block for h in handles):
+            blocks.append(block)
+    return blocks, consumed_chars
+
+
 def extract_last_message(new_content, cfg):
     """Pull the last full message block containing ANY configured handle and <OVER>.
 
@@ -185,22 +229,12 @@ def extract_last_message(new_content, cfg):
 
     Accepts messages from any configured agent including the optional Oya
     layer — an [@OYA] Note that doesn't address @OPUS or @CODA in the body
-    still parses cleanly so the relay can route it appropriately."""
-    over_re = over_pattern(cfg["comms"]["over_signal"])
-    handles = _all_configured_handles(cfg)
+    still parses cleanly so the relay can route it appropriately.
 
-    def _block_has_handle(block):
-        return any(h in block for h in handles)
-
-    blocks = new_content.split("---------------------------------------------------")
-    for block in reversed(blocks):
-        if over_re.search(block) and _block_has_handle(block):
-            return block.strip()
-
-    if over_re.search(new_content) and _block_has_handle(new_content):
-        return new_content.strip()
-
-    return None
+    Rebased on extract_messages() — kept for tooling/tests that genuinely
+    want only the newest block. The watcher itself drains ALL blocks."""
+    blocks, _ = extract_messages(new_content, cfg)
+    return blocks[-1] if blocks else None
 
 
 def parse_result_field(message_block):

@@ -14,6 +14,7 @@ from orchestrator import (
     detect_sender,
     detect_writer_from_buffer,
     extract_last_message,
+    extract_messages,
     is_idle_result,
     is_state_affecting,
     message_type,
@@ -164,6 +165,99 @@ class TestExtractLastMessage:
         result = extract_last_message(content, make_cfg())
         assert result is not None
         assert "@CODA" in result
+
+
+class TestExtractMessages:
+    """extract_messages drains EVERY complete block in write order.
+
+    Regression suite for the 2026-06-06 field-diagnosed relay drops: the
+    last-block-only predecessor silently discarded every earlier message
+    whenever 2+ posts landed in one watcher read window, and the
+    advance-to-EOF offset jumped over still-composing partial tails."""
+
+    SEP = "---------------------------------------------------"
+
+    def test_returns_all_blocks_in_write_order(self):
+        content = (
+            f"{self.SEP}\n"
+            "[@OPUS] first message\n<OVER>\n"
+            f"{self.SEP}\n"
+            "[@CODA] second message\n<OVER>\n"
+            f"{self.SEP}\n"
+            "[@OPUS] third message\n<OVER>\n"
+        )
+        blocks, consumed = extract_messages(content, make_cfg())
+        assert len(blocks) == 3
+        assert "first message" in blocks[0]
+        assert "second message" in blocks[1]
+        assert "third message" in blocks[2]
+
+    def test_burst_without_separators_still_splits_on_over(self):
+        """Message boundaries are the over-signal, not the cosmetic separator —
+        agents that skip the dash line must not get their messages merged."""
+        content = (
+            "[@OPUS] reply A\n<OVER>\n"
+            "[@CODA] reply B\n<OVER>\n"
+        )
+        blocks, _ = extract_messages(content, make_cfg())
+        assert len(blocks) == 2
+        assert "reply A" in blocks[0] and "reply B" not in blocks[0]
+        assert "reply B" in blocks[1] and "reply A" not in blocks[1]
+
+    def test_consumed_stops_at_last_complete_block(self):
+        """A still-composing partial tail is NOT consumed — the watcher must
+        re-read it next tick rather than jump the offset past it."""
+        complete = "[@OPUS] done part\n<OVER>\n"
+        partial = "[@CODA] half-written, no sentinel yet"
+        content = complete + partial
+        blocks, consumed = extract_messages(content, make_cfg())
+        assert len(blocks) == 1
+        tail = content[consumed:]
+        assert "half-written" in tail
+        assert "<OVER>" not in tail
+
+    def test_junk_over_span_dropped_but_consumed(self):
+        """An over-closed span with no recognised handle is noise: excluded
+        from the block list but still counted as consumed so the watcher
+        doesn't spin on it forever."""
+        junk = "stray paste with no handle\n<OVER>\n"
+        real = "[@CODA] real message\n<OVER>\n"
+        content = junk + real
+        blocks, consumed = extract_messages(content, make_cfg())
+        assert len(blocks) == 1
+        assert "real message" in blocks[0]
+        assert consumed >= content.rindex("<OVER>")
+
+    def test_empty_and_no_over_content(self):
+        assert extract_messages("", make_cfg()) == ([], 0)
+        blocks, consumed = extract_messages(
+            "[@OPUS] composing, not finished", make_cfg())
+        assert blocks == [] and consumed == 0
+
+    def test_oya_block_recognised(self):
+        cfg = make_cfg()
+        cfg["agents"]["oyakata"] = {"handle": "@OYA"}
+        content = "[@OYA] Note for the pair\n<OVER>\n"
+        blocks, _ = extract_messages(content, cfg)
+        assert len(blocks) == 1 and "@OYA" in blocks[0]
+
+    def test_last_message_parity(self):
+        """extract_last_message must agree with extract_messages[-1]."""
+        content = (
+            f"{self.SEP}\n[@OPUS] one\n<OVER>\n"
+            f"{self.SEP}\n[@CODA] two\n<OVER>\n"
+        )
+        blocks, _ = extract_messages(content, make_cfg())
+        assert extract_last_message(content, make_cfg()) == blocks[-1]
+
+    def test_verbatim_duplicate_blocks_both_returned(self):
+        """Two identical posts are two messages — dedup is the watcher's
+        recently-relayed memory's job (and refusals must not poison it),
+        not the parser's."""
+        msg = "[@OPUS] same text\n<OVER>\n"
+        blocks, _ = extract_messages(msg + msg, make_cfg())
+        assert len(blocks) == 2
+        assert blocks[0] == blocks[1]
 
 
 class TestDetectWriterFromBuffer:

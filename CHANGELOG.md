@@ -6,6 +6,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The relay no longer silently drops messages — four defects fixed in one
+  redesign of the watcher's read path.** Field-diagnosed on a second
+  operator's deployment (and independently root-caused by that deployment's
+  own Oya, who patched her local copy, validated it against this repo's full
+  test suite, and left it uncommitted for maintainer review — this is the
+  canonical version of that fix, plus two defects she didn't hit):
+  (1) **batch-drop** — the watcher extracted only the LAST message in a read
+  span, so any fast exchange landing 2+ posts in one ~3s window silently
+  discarded all but the newest; the watcher now drains every complete block
+  in write order (`comms.extract_messages()`); (2) **advance-before-deliver**
+  — the read offset advanced before relay delivery, so one transient tmux
+  failure lost that message permanently; the offset now advances only after
+  the whole span is processed, and a mid-drain failure retries the span
+  (already-relayed blocks are skipped by a new multi-deep recently-relayed
+  memory — worst case a duplicate nudge, never a silent drop);
+  (3) **refusal-poisoned re-post** — a guard-refused message (e.g.
+  capsule-stale) was remembered as "already relayed", so an agent that fixed
+  the cause and re-posted the same text VERBATIM had it silently dropped;
+  refusals no longer feed the dedup memory; (4) **partial-tail jump** — the
+  offset advanced to end-of-file even when the span ended with a
+  still-composing message, losing it when its over-signal arrived; the
+  advance now stops at the last COMPLETE block. Duplicate skips and
+  multi-message drains are logged. 8 regression tests; suite at 470.
+
 ### Added
 
 - **Relay refusals now interrupt the operator instead of scrolling away.**
