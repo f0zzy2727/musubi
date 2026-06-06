@@ -8,6 +8,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Relay refusals now interrupt the operator instead of scrolling away.**
+  The watcher's guards (ack-of-ack idle streaks, capsule-stale holds, and
+  unparseable-content drops) were printed to the watcher log and nowhere
+  else — from the operator seat, a *refusing* relay was indistinguishable
+  from a *broken* one. Field report from a second operator: an entire
+  session spent hand-carrying every handoff between panes because nothing
+  said why nothing moved. Refusals now ride the same interrupt surface as
+  operator actions: a `⛔ RELAY HELD` segment pinned to the tmux status bar
+  (composing with, not clobbering, the `⚑ AWAITING YOU` pin), a desktop
+  notification plus terminal-bell banner on the first refusal of each
+  episode, and an automatic all-clear the moment a message relays normally.
+
+- **Protocol-health boot banner: detect the workshop running without the
+  protocol.** Musubi guarded oversized docs (orch-2) and capsules going
+  stale *within* a session, but the outer failure was silent: days of code
+  commits landing from bare agent sessions while capsules/comms never move,
+  so the next supervised session warm-starts from a contradiction soup and
+  the operator blames the agents. Two warn-only pre-flight checks now run at
+  launch: (1) **detachment** — newest project commit vs the newest sign of
+  life (commit or mtime) across capsule/todo/handoff/comms; a gap over
+  `[orchestrator].detachment_threshold_days` (default 2) emits a loud
+  `⚠ PROTOCOL HEALTH` banner with the commit count and reconciliation
+  warning; (2) **runbook version drift** — the project runbook's
+  `**Version:**` header vs the copy this checkout ships; an out-of-date fork
+  gets one line saying exactly that ("run bootstrap.sh — your fork is backed
+  up"). The combined note is also handed to Oya at spawn, since a
+  days-stale picture is precisely her altitude. Honest limit: the check
+  fires at the *next* launch — bare sessions are invisible while they
+  happen.
+
 - **Oya north-star docs are now a first-class, documented prerequisite.** Oya's
   first duty is custody of the vision, and she can't guard a vision she can't
   see — but the setup path never said so. Three additions close that gap:

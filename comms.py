@@ -421,6 +421,51 @@ def format_actions_status(pending):
     return f"⚑ {n} AWAITING YOU: {head} (+{n - 1} more)"
 
 
+def format_relay_refusal_status(refusal_counts):
+    """Status-bar segment for active relay refusals (orch-8). From the operator
+    seat a refusing relay is indistinguishable from a broken one — the refusal
+    line scrolls away in the watcher log and the agents just look idle. This
+    pins the WHY on the one surface that doesn't scroll. Empty dict → ""
+    (clears the segment). `refusal_counts` maps guard name → refusals since
+    the last successful pair relay, e.g. {"capsule-stale": 3}."""
+    if not refusal_counts:
+        return ""
+    parts = [f"{guard} ×{n}" for guard, n in sorted(refusal_counts.items())]
+    return "⛔ RELAY HELD: " + ", ".join(parts)
+
+
+def compose_status_right(*segments):
+    """Join non-empty status-bar segments (operator actions, relay refusals)
+    into one status-right string so the surfaces share the bar instead of
+    clobbering each other. All segments empty → "" (clears the pin)."""
+    return " | ".join(s for s in segments if s)
+
+
+# Runbook version header as installed by bootstrap, e.g. `**Version:** 1.10`.
+# Forks may append provenance after the number (e.g. "(forked from musubi
+# 2026-05-10 ...)") — tolerated, not captured.
+_RUNBOOK_VERSION_RE = re.compile(
+    r"^\*\*Version:\*\*\s*([0-9]+(?:\.[0-9]+)*)", re.MULTILINE)
+
+
+def parse_runbook_version(text):
+    """Extract the numeric version from a runbook's `**Version:** X.Y` header.
+    Returns the version string (e.g. '1.10') or None if no header is found."""
+    m = _RUNBOOK_VERSION_RE.search(text or "")
+    return m.group(1) if m else None
+
+
+def runbook_version_tuple(version):
+    """'1.10' → (1, 10) for numeric comparison ('1.9' < '1.10' must hold,
+    which plain string comparison gets wrong). None/garbage → None."""
+    if not version:
+        return None
+    try:
+        return tuple(int(p) for p in version.split("."))
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Sender detection (canonical form)
 # ---------------------------------------------------------------------------

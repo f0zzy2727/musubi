@@ -34,6 +34,12 @@ operating_model = "docs/agents/PAIR_OPERATING_MODEL.md"  # rationale + adoption 
 [tmux]
 session_name = "musubi"                  # tmux session name — change if running multiple sessions
 
+# --- Optional: orchestrator boot guards -------------------------------------
+# [orchestrator]
+# detachment_threshold_days = 2          # orch-7: warn at boot when code commits run
+#                                        # this many days ahead of capsule/comms updates
+#                                        # (work happened outside the orchestrator)
+
 # --- Optional: Oyakata (Oya) third-agent layer -----------------------------
 # Default musubi is a two-agent pair (Opus + Coda). Oya is an optional third
 # agent — a supervisor who watches the pair, builds context across events, and

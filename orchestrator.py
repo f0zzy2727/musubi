@@ -37,6 +37,10 @@ from comms import (
     detect_sender,
     parse_operator_actions,
     format_actions_status,
+    format_relay_refusal_status,
+    compose_status_right,
+    parse_runbook_version,
+    runbook_version_tuple,
 )
 
 # Oyakata (Oya) — optional third-agent supervisor layer in oyakata.py.
@@ -546,6 +550,157 @@ def _git_head_sha(repo_dir):
     return None
 
 
+def _git_last_commit_ts(repo_dir, *paths):
+    """Unix timestamp of the most recent commit in repo_dir, optionally
+    limited to commits touching `paths`. None outside a git repo, when no
+    commit touches the paths, or on any failure. Never raises."""
+    cmd = ["git", "-C", repo_dir, "log", "-1", "--format=%ct"]
+    if paths:
+        cmd += ["--"] + list(paths)
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        val = out.stdout.strip()
+        if out.returncode == 0 and val:
+            return int(val)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def _git_commit_count_since(repo_dir, unix_ts):
+    """Count commits on HEAD strictly newer than `unix_ts`. None on failure."""
+    since = datetime.fromtimestamp(unix_ts).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo_dir, "rev-list", "--count", "HEAD",
+             f"--since={since}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        val = out.stdout.strip()
+        if out.returncode == 0 and val:
+            return int(val)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def check_protocol_detachment(cfg):
+    """Boot guard (orch-7): detect the workshop running without the protocol.
+
+    Musubi guards docs that are too big (orch-2) and capsules that go stale
+    *within* a session (capsule-staleness guard). The outer failure — the
+    project's code moving for days while the capsules/comms never move at
+    all, because work happened in bare sessions outside the orchestrator —
+    was completely silent. Field-tested signature: 58 code commits over six
+    days against capsules last updated before any of them; the next session
+    then warm-starts from a contradiction soup and the operator blames the
+    agents.
+
+    Detection: newest project commit vs the newest sign of life across the
+    protocol files (capsule / agent-todo / agent-handoff / comms). Per file,
+    freshness = max(last commit touching it, mtime) — mtime so an
+    uncommitted-but-current capsule doesn't false-positive; commit ts so the
+    signal survives clones and backups. If the gap exceeds
+    [orchestrator].detachment_threshold_days (default 2), return a warning
+    string for the boot banner (also handed to Oya — a stale picture is
+    precisely her altitude). Returns None when healthy, not a git repo, or
+    nothing to compare. Limit (honest): only fires at the NEXT launch; bare
+    sessions are invisible while they happen."""
+    project = cfg.get("project", {}).get("path", ".")
+    threshold_days = cfg.get("orchestrator", {}).get(
+        "detachment_threshold_days", 2)
+    head_ts = _git_last_commit_ts(project)
+    if head_ts is None:
+        return None  # not a git repo / no commits — nothing to compare
+
+    protocol_paths = [path for label, path in _managed_doc_paths(cfg)
+                      if label != "CLAUDE.md"]
+    comms_rel = cfg.get("comms", {}).get("file", "")
+    if comms_rel:
+        protocol_paths.append(
+            comms_rel if os.path.isabs(comms_rel)
+            else os.path.join(project, comms_rel))
+
+    newest = None
+    for path in protocol_paths:
+        candidates = [_git_last_commit_ts(project, path)]
+        try:
+            candidates.append(os.path.getmtime(path))
+        except OSError:
+            pass
+        for ts_val in candidates:
+            if ts_val is not None and (newest is None or ts_val > newest):
+                newest = ts_val
+    if newest is None:
+        return None  # no protocol files at all — bootstrap hasn't run; the
+        #              missing-docs paths are someone else's warning
+
+    gap_days = (head_ts - newest) / 86400.0
+    if gap_days <= threshold_days:
+        return None
+
+    n_commits = _git_commit_count_since(project, newest)
+    commits_part = (f"{n_commits} commits" if n_commits
+                    else "code commits") + " since the protocol files last moved"
+    newest_date = datetime.fromtimestamp(newest).strftime("%Y-%m-%d")
+    return (f"{commits_part} (gap {gap_days:.0f} days; newest protocol "
+            f"update {newest_date}). The protocol has been bypassed — the "
+            f"capsules/comms describe a repo that no longer exists. "
+            f"Reconcile them with the code before the pair works from them.")
+
+
+def check_runbook_version_drift(cfg):
+    """Boot guard (orch-7, second half): compare the project's installed
+    runbook version against the copy this musubi checkout would install.
+    A field-report operator sat on a v1.7 fork while v1.9+ shipped every fix
+    for the failure mode he then hit — and nothing told him. Returns a
+    warning string when this checkout ships a NEWER runbook, else None.
+    (A project runbook ahead of the checkout means the musubi clone itself
+    is stale — said plainly too.)"""
+    project = cfg.get("project", {}).get("path", ".")
+    rel = cfg.get("comms", {}).get(
+        "runbook", "docs/agents/AGENT_COLLAB_RUNBOOK.md")
+    project_runbook = rel if os.path.isabs(rel) else os.path.join(project, rel)
+    shipped_runbook = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "docs", "agents", "AGENT_COLLAB_RUNBOOK.md")
+    try:
+        with open(project_runbook, encoding="utf-8") as f:
+            project_v = parse_runbook_version(f.read())
+        with open(shipped_runbook, encoding="utf-8") as f:
+            shipped_v = parse_runbook_version(f.read())
+    except OSError:
+        return None
+    pv, sv = runbook_version_tuple(project_v), runbook_version_tuple(shipped_v)
+    if pv is None or sv is None or pv == sv:
+        return None
+    if pv < sv:
+        return (f"Project runbook is v{project_v}; this musubi ships "
+                f"v{shipped_v} — run bootstrap.sh to refresh the managed "
+                f"docs (your fork is backed up automatically; diff it first "
+                f"if you've customised).")
+    return (f"Project runbook is v{project_v} but this musubi checkout ships "
+            f"v{shipped_v} — the musubi clone itself looks stale; "
+            f"git pull it before relaunching.")
+
+
+def emit_protocol_health_banner(notes):
+    """Loud boot banner for orch-7 findings. `notes` is a list of warning
+    strings; empty list → no output."""
+    if not notes:
+        return
+    bar = "─" * 60
+    try:
+        sys.stdout.write("\a")  # terminal bell
+    except Exception:
+        pass
+    print(f"\n{bar}")
+    print("  ⚠ PROTOCOL HEALTH")
+    for note in notes:
+        print(f"    • {note}")
+    print(f"{bar}\n", flush=True)
+
+
 def recognised_handles(cfg):
     """Return the set of comms handles the running config recognises. Agents
     without a handle (e.g. the oyakata observer) are excluded — a message from
@@ -854,6 +1009,26 @@ def emit_action_banner(new_items, total_pending):
     print(f"{bar}\n", flush=True)
 
 
+def emit_refusal_banner(guard, detail):
+    """Print a prominent block when the relay starts holding messages back
+    (orch-8) — same shape as the action banner so a refusing relay is as
+    visible as a pending ask. Fired once per guard per episode; repeat
+    refusals only bump the status-bar count. Field-tested failure mode: an
+    operator hand-carried every handoff for a whole session because the
+    refusal lines had scrolled away and nothing said WHY nothing moved."""
+    bar = "─" * 60
+    try:
+        sys.stdout.write("\a")  # terminal bell
+    except Exception:
+        pass
+    print(f"\n{bar}")
+    print(f"  ⛔ RELAY HELD — {guard}")
+    print(f"    • {detail}")
+    print("  → the watcher is holding messages back ON PURPOSE; the writer")
+    print("    pane has been told how to clear it. Nothing relays until it does.")
+    print(f"{bar}\n", flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Relay
 # ---------------------------------------------------------------------------
@@ -899,13 +1074,17 @@ def relay_instruction(message_block, sender, p_claude, p_codex, cfg):
 # Main watcher loop
 # ---------------------------------------------------------------------------
 
-def watch_and_relay(p_claude, p_codex, cfg, session=None):
+def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     """Watch comms file for <OVER> signals and relay to the other agent.
 
     When [agents.oyakata].enabled is true and `session` is supplied, also
     relays each parsed message to a discovered Oya pane and emits
     capsule-edit notifications. session is optional so attach_to_musubi
     can call this without the oyakata layer if it wishes.
+
+    `oya_boot_note` (orch-7): protocol-health warning detected at boot,
+    delivered once to the Oya pane when it's discovered — the picture she
+    orients from may be days behind the code, and she should say so.
     """
     comms_file = cfg["comms"]["file"]
     over = cfg["comms"]["over_signal"]
@@ -948,6 +1127,20 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
               f"found — will retry on each tick until it appears.")
     if oya_pane_announced:
         print(f"[{ts()}] [WATCHER] Oyakata pane discovered: {p_oyakata.pane_id}")
+
+    # orch-7: protocol-health note for Oya, delivered once on pane discovery.
+    def _deliver_oya_boot_note(pane):
+        send_message(pane,
+            f"[ORCHESTRATOR boot check] Protocol health warning for this "
+            f"project: {oya_boot_note} Factor this into your picture — the "
+            f"capsules and comms you orient from may be behind the code. "
+            f"Flag it to the pair if they warm-start from them uncritically.",
+            cfg)
+        _log("WATCHER", "delivered orch-7 protocol-health note to Oya")
+
+    if oya_boot_note and p_oyakata is not None:
+        _deliver_oya_boot_note(p_oyakata)
+        oya_boot_note = None  # once only
 
     # Capsule-edit watcher: notify Oya when current-state.md mtime changes.
     capsule_rel = cfg["comms"].get("capsule", "docs/agents/current-state.md")
@@ -1000,9 +1193,46 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
         # Prime seen-keys + the pin from any already-outstanding actions so a
         # re-attach shows the pin but does NOT re-notify for old asks.
         oa_seen_keys = {a["key"] for a in existing}
-        set_actions_statusbar(session, format_actions_status(existing))
+        oa_status_text = format_actions_status(existing)
+        set_actions_statusbar(session, oa_status_text)
         print(f"[{ts()}] [ACTION] operator-action surface active — watching "
               f"{oa_path} ({len(existing)} outstanding)")
+    else:
+        oa_status_text = ""
+
+    # Relay-health surface (orch-8). A refusing relay is invisible from the
+    # agent panes — the operator experiences it as "the relay is broken" and
+    # starts hand-carrying messages by hand. Track refusals per guard since
+    # the last successful pair relay and surface them on the SAME interrupt
+    # surface as operator actions (status-bar pin + desktop notification +
+    # banner), not just the scrolling watcher log. The pin clears itself the
+    # moment a message relays normally.
+    refusal_counts = {}    # guard name -> refusals this episode
+    refusal_notified = set()  # guards already notified/bannered this episode
+
+    def _pin_status():
+        """Re-pin status-right composing both surfaces (actions + refusals)."""
+        set_actions_statusbar(session, compose_status_right(
+            oa_status_text, format_relay_refusal_status(refusal_counts)))
+
+    def _surface_refusal(guard, detail):
+        """Record a relay refusal and interrupt the operator on the first one
+        of each guard per episode. Repeats bump the pinned count only."""
+        refusal_counts[guard] = refusal_counts.get(guard, 0) + 1
+        _pin_status()
+        if guard not in refusal_notified:
+            refusal_notified.add(guard)
+            notify_operator("musubi — relay held", f"{guard}: {detail}")
+            emit_refusal_banner(guard, detail)
+
+    def _clear_refusals():
+        """A message relayed normally — the episode is over; clear the pin."""
+        if refusal_counts:
+            _log("WATCHER", f"relay flowing again — clearing "
+                            f"{sum(refusal_counts.values())} surfaced refusal(s)")
+            refusal_counts.clear()
+            refusal_notified.clear()
+            _pin_status()
 
     # Mid-session staleness detection (orch-3 mitigation 2). Capture the
     # orchestrator repo's HEAD at startup and re-check periodically; warn once
@@ -1041,6 +1271,9 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                     print(f"[{ts()}] [WATCHER] Oyakata pane discovered mid-session: "
                           f"{p_oyakata.pane_id}")
                     oya_pane_announced = True
+                if p_oyakata is not None and oya_boot_note:
+                    _deliver_oya_boot_note(p_oyakata)
+                    oya_boot_note = None  # once only
 
             # Capsule edit watcher: notify Oya when the capsule's mtime changes.
             if oya_active and p_oyakata is not None \
@@ -1090,7 +1323,8 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                     if new_items:
                         emit_action_banner(new_items, len(pending))
                     oa_seen_keys |= {a["key"] for a in pending}
-                    set_actions_statusbar(session, format_actions_status(pending))
+                    oa_status_text = format_actions_status(pending)
+                    _pin_status()
 
             # Tier-2 pending-decision relay (oyakata-2 slice 3).
             # Hook writes a request file when a tool call falls outside the
@@ -1199,6 +1433,12 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                               f"skipping {skipped_bytes} unparseable bytes. {sidecar_note} If a real "
                               f"message was lost, ask the agent to re-send it with a proper "
                               f"[{opus_handle}] / [{coda_handle}] header.")
+                        # orch-8: a silent skip looks identical to a dead relay
+                        # from the operator seat — surface the drop.
+                        _surface_refusal(
+                            "unparseable-drop",
+                            f"skipped {skipped_bytes} bytes with no recognised "
+                            f"handle — {sidecar_note}")
                         last_offset = current_size
                         unparseable_at_size = None
                         unparseable_retries = 0
@@ -1258,6 +1498,12 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                         f"break the loop. See the runbook's Comms Protocol section.",
                         cfg
                     )
+                    # orch-8: interrupt the operator — a held relay must not
+                    # hide in the scrolling watcher log.
+                    _surface_refusal(
+                        "idle-streak",
+                        f"{idle_streak} consecutive idle messages — the pair is "
+                        f"acknowledging, not working. A slice claim clears it.")
                     last_relayed_block = message_block
                     continue
             else:
@@ -1284,12 +1530,24 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None):
                     f"capsule-before-comms invariant, update the capsule first, then re-post.",
                     cfg
                 )
+                # orch-8: interrupt the operator — a held relay must not hide
+                # in the scrolling watcher log.
+                _surface_refusal(
+                    "capsule-stale",
+                    f"{msg_type or 'state-affecting message'} from {sender} held — "
+                    f"the capsule ({cap_rel}) hasn't been updated. "
+                    f"Capsule first, then re-post.")
                 last_relayed_block = message_block
                 continue
 
             last_relayed_block = message_block
             relay_instruction(message_block, sender, p_claude, p_codex, cfg)
             print(f"[{ts()}] [{sender} -> {'CODA' if sender == 'OPUS' else 'OPUS'}] Relayed.")
+            # orch-8: a normal pair relay ends any refusal episode — clear the
+            # pinned warning so the surface only ever shows live problems.
+            # (Deliberately NOT cleared on Oya relays above: she is guard-exempt,
+            # so her messages flowing says nothing about the pair being unstuck.)
+            _clear_refusals()
 
             # A1: on a slice claim/start, auto-fire the discipline scope sensor
             # over the receipt's declared file targets and surface any triggered
@@ -1450,6 +1708,18 @@ def start_musubi(config_path="musubi.toml", session_override=None):
     # warn on merely-large ones (orch-2). Runs before the tmux session so the
     # operator rotates first instead of paying the context cost every boot.
     check_managed_doc_sizes(cfg)
+
+    # Pre-flight: protocol health (orch-7). Two warn-only checks: (1) has the
+    # code moved for days while the protocol files stood still (work happened
+    # outside the orchestrator — capsules now describe a repo that no longer
+    # exists)? (2) is the project's runbook version behind what this checkout
+    # ships? Both convert silent rot into a banner the operator sees BEFORE
+    # the agents warm-start from stale state. The note is also handed to Oya
+    # at spawn — a stale picture is precisely her altitude.
+    protocol_notes = [n for n in (check_protocol_detachment(cfg),
+                                  check_runbook_version_drift(cfg)) if n]
+    emit_protocol_health_banner(protocol_notes)
+    oya_boot_note = " | ".join(protocol_notes) if protocol_notes else None
 
     # Pre-flight: verify project.path is enterable BEFORE the tmux session is
     # created. Catches the stale-cwd / iCloud-sync failure mode (orch-6) and
@@ -1698,7 +1968,8 @@ def start_musubi(config_path="musubi.toml", session_override=None):
     )
 
     _log("WATCHER", "all gates cleared — starting relay watcher")
-    watch_and_relay(p_claude, p_codex, cfg, session=session)
+    watch_and_relay(p_claude, p_codex, cfg, session=session,
+                    oya_boot_note=oya_boot_note)
 
 
 def attach_to_musubi(config_path="musubi.toml", session_override=None):
