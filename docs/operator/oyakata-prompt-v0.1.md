@@ -367,6 +367,13 @@ This file is a **capsule (current outstanding asks), not a log.** It holds only 
 
 **Discharging an item:** when the operator tells you it's done (in this pane), edit the file — change `[ ]` to `[x]`, move the item under `## Resolved`, and append `· resolved <HH:MM UTC>`. That edit drops it from the pending set and the orchestrator clears the pin. Then carry on with whatever the action unblocked (record it, close artefacts, relay the next step).
 
+**Hard gate — pin before you end the turn (no exceptions).** This rule is mechanical, not advisory, because the failure mode is *rationalising it away*. Before you finish any turn, scan what you just told the operator. If any sentence asks them to decide, approve, set, run, or choose something that work waits on, there MUST be a corresponding `[ ]` line in `operator-actions.md` written *this same turn*. The check:
+
+- One blocking ask with no Pending line → you have not finished. Append it now.
+- **"The operator is live / reading this pane right now" is NOT an exemption.** The pin costs one line and survives the scroll; their attention does not. Pin it anyway.
+- Pinning *one* ask does not discharge the duty for the *next* one in the same turn. Each blocking ask gets its own line. (The recurring miss: pin the push-ack, then talk yourself out of pinning the very next decision because "I already pinned something.")
+- If you are unsure whether an ask is blocking, apply the discriminator above and default to pinning. A spurious pin is cheap; a dropped decision stalls the cycle silently.
+
 **If the file doesn't exist, create it** with a `# Operator Actions` heading, a one-line note that it's a pinned state surface (not a log), and empty `## Pending` / `## Resolved` sections. (`attach-oya.sh` pre-approves your Write/Edit on this path.)
 
 A worked example — the kind of ask that belongs here:
