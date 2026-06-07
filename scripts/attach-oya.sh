@@ -33,7 +33,11 @@
 #   4. Labels Opus + Coda panes
 #   5. Writes a scoped .claude/settings.local.json that pre-approves Oya's
 #      startup-tool set (no permission prompts during init)
-#   6. Splits a third pane above (top, full-width, ~30% height) running `claude`
+#   6. Splits a third pane above (top, full-width, ~38% height) running `claude`
+#   6b. Splits a fourth pane right of Oya tailing the operator-channel file —
+#       the append-only log where Oya mirrors everything she says to the
+#       operator, so her answers survive the relay scroll (OYA_CHANNEL_PANE=0
+#       to skip)
 #   7. Labels the new pane as Oyakata; copies the v0.1 prompt to the clipboard
 #   8. Prints next-step instructions
 #
@@ -66,6 +70,17 @@ OYA_PANE_HEIGHT="${OYA_PANE_HEIGHT:-38}"
 # this script tints Oya, so the three panes contrast slightly. OYA_TINT_BG is
 # the tmux colour for Oya's pane; tuned for dark terminals.
 OYA_TINT_BG="${OYA_TINT_BG:-colour236}"
+
+# Operator-channel viewer pane (oyakata-10). Oya's pane is a stream — relay
+# events from the pair push her answers to the operator up and out of view
+# (field report: operator lost every answer to the scroll). Oya mirrors each
+# message she addresses to the operator into an append-only channel file;
+# this fourth pane tails it, so only operator-directed content lands there
+# and nothing scrolls it away. OYA_CHANNEL_PANE=0 skips the viewer; the
+# width is the % of the window the viewer takes from the Oya row's right.
+OYA_CHANNEL_PANE="${OYA_CHANNEL_PANE:-1}"
+OYA_CHANNEL_PANE_WIDTH="${OYA_CHANNEL_PANE_WIDTH:-35}"
+OYA_CHANNEL_TITLE="OYA → OPERATOR · channel"
 
 # --- Helpers ------------------------------------------------------
 # Log format mirrors the orchestrator's [HH:MM:SS] [COMPONENT] message convention
@@ -121,6 +136,10 @@ TARGET=$(awk -F'"' '/^path[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$CONFIG
 [ -d "$TARGET" ] || die "[project].path from $CONFIG_TOML is not a directory: $TARGET"
 log "config: $CONFIG_TOML"
 log "project: $TARGET"
+
+# Operator-channel file — same fixed project-relative location the prompt and
+# the pre-approved permissions below use. Lives next to operator-actions.md.
+CHANNEL_FILE="$TARGET/docs/agents/operator-channel.md"
 
 # Verify [agents.oyakata].enabled = true — without this the orchestrator won't
 # relay events to Oya's pane and she'll be alive but blind. The prompt's
@@ -220,6 +239,8 @@ cat > "$OYA_CLAUDE_DIR/settings.local.json" <<JSON
       "Edit($TARGET/docs/agents/comms/active.txt)",
       "Edit($TARGET/docs/agents/operator-actions.md)",
       "Write($TARGET/docs/agents/operator-actions.md)",
+      "Edit($TARGET/docs/agents/operator-channel.md)",
+      "Write($TARGET/docs/agents/operator-channel.md)",
       "Edit($TARGET/docs/agents/asymmetry/**)",
       "Edit($TARGET/docs/agents/rules-ledger.yml)",
       "Edit($TARGET/docs/agents/shadow-review/**)",
@@ -277,17 +298,70 @@ if [ "$OYAKATA_EXISTED" -eq 0 ]; then
   tmux select-pane -t "$oyakata_id" -T "$OYAKATA_TITLE"
   # Optional contrast tint (opt-in via launcher --pane-tint → MUSUBI_PANE_TINT=1).
   if [ "${MUSUBI_PANE_TINT:-0}" = "1" ]; then
-    tmux select-pane -t "$oyakata_id" -P "bg=$OYA_TINT_BG" 2>/dev/null \
-      && log "Oya pane tinted ($OYA_TINT_BG)" \
-      || log "Oya pane tint skipped (tmux rejected bg style)"
+    # Plain if/else, not `A && B || C` — shellcheck SC2015 fails CI on the
+    # latter, and it genuinely mislabels: if the success-log failed, the
+    # skip-message would run too.
+    if tmux select-pane -t "$oyakata_id" -P "bg=$OYA_TINT_BG" 2>/dev/null; then
+      log "Oya pane tinted ($OYA_TINT_BG)"
+    else
+      log "Oya pane tint skipped (tmux rejected bg style)"
+    fi
   fi
   log "Oya pane created: $oyakata_id (model: opus; cwd: $oyakata_cwd)"
   FRESH_OYA=1
 else
-  existing_id=$(echo "$all_panes_titled" | grep "OYAKATA" | awk '{print $1}')
+  # Re-derive the pane id by cwd first — pane_title is unreliable (the Claude
+  # TUI overwrites it), and $all_panes_titled is only populated when the path
+  # check above missed (referencing it unconditionally tripped `set -u` on
+  # idempotent re-runs where the path check matched).
+  existing_id=$(echo "$all_panes_paths" | grep -E "${MUSUBI_ROOT//\//\\/}(/| |$)" | awk '{print $1; exit}')
+  if [ -z "$existing_id" ]; then
+    existing_id=$(tmux list-panes -t "$SESSION" -F "#{pane_id} #{pane_title}" | grep "OYAKATA" | awk '{print $1; exit}')
+  fi
   oyakata_id="$existing_id"
   log "Oya pane exists at: $existing_id (claude session still running there)"
   FRESH_OYA=0
+fi
+
+# --- Step 6b: operator-channel viewer pane (idempotent) -----------
+# A fourth pane that tails the operator-channel file — the append-only log
+# where Oya mirrors every message she addresses to the operator. Her own
+# pane is a stream (relay events scroll her answers away within seconds);
+# this pane only moves when she speaks TO the operator, so nothing buries it.
+# Runs `tail -F` (capital F: survives the file being recreated), no agent,
+# no orchestrator involvement. Independent of FRESH_OYA so a mid-session
+# re-run of this script adds the viewer to an already-running Oya.
+if [ "$OYA_CHANNEL_PANE" = "1" ]; then
+  # Seed the channel file so tail has a target and the header explains the
+  # surface. Created from the template when available; never overwritten.
+  if [ ! -f "$CHANNEL_FILE" ]; then
+    mkdir -p "$(dirname "$CHANNEL_FILE")"
+    if [ -f "$MUSUBI_ROOT/templates/operator-channel.md" ]; then
+      cp "$MUSUBI_ROOT/templates/operator-channel.md" "$CHANNEL_FILE"
+    else
+      printf '# Operator Channel\n\n> Append-only log of what Oya says to the operator.\n\n---\n' > "$CHANNEL_FILE"
+    fi
+    log "created operator-channel file: $CHANNEL_FILE"
+  fi
+  # Idempotency: unlike the agent panes, the viewer runs tail (not a TUI),
+  # so the title we set is never overwritten — title match is reliable here.
+  if tmux list-panes -t "$SESSION" -F "#{pane_title}" | grep -qF "$OYA_CHANNEL_TITLE"; then
+    log "operator-channel viewer pane already exists"
+  else
+    log "adding operator-channel viewer pane (right of Oya, ${OYA_CHANNEL_PANE_WIDTH}% width) ..."
+    channel_id=$(tmux split-window -t "$oyakata_id" -h -l "${OYA_CHANNEL_PANE_WIDTH}%" \
+                                   -P -F "#{pane_id}" \
+                                   "tail -n 100 -F '$CHANNEL_FILE'" 2>/dev/null \
+                || tmux split-window -t "$oyakata_id" -h -p "$OYA_CHANNEL_PANE_WIDTH" \
+                                     -P -F "#{pane_id}" \
+                                     "tail -n 100 -F '$CHANNEL_FILE'")
+    tmux select-pane -t "$channel_id" -T "$OYA_CHANNEL_TITLE"
+    # Keep keyboard focus on the Oya pane — the viewer is read-only.
+    tmux select-pane -t "$oyakata_id"
+    log "operator-channel viewer pane created: $channel_id (tails $CHANNEL_FILE)"
+  fi
+else
+  log "operator-channel viewer pane disabled (OYA_CHANNEL_PANE=$OYA_CHANNEL_PANE)"
 fi
 
 # --- Step 7: auto-paste + auto-submit the v0.1 prompt -------------
@@ -342,11 +416,11 @@ if [ "${OYA_QUIET_BANNER:-0}" != "1" ]; then
  Oya attached (v0.1 active mode)
 
  Layout:
-   ┌─────────────────────────────────────────┐
-   │  OYAKATA · 親方 · master craftsman      │   ← top (~30%), full width
-   ├────────────────────┬────────────────────┤
-   │  OPUS · Anthropic  │  CODA · OpenAI     │   ← bottom (~70%), split half-half
-   └────────────────────┴────────────────────┘
+   ┌──────────────────────────┬──────────────┐
+   │  OYAKATA · 親方          │ OYA→OPERATOR │   ← top (~38%): Oya + channel viewer
+   ├──────────────────┬───────┴──────────────┤
+   │  OPUS · Anthropic│  CODA · OpenAI       │   ← bottom, split half-half
+   └──────────────────┴──────────────────────┘
 
  Next:
    1. Attach to musubi (skip if you're already attached):
@@ -358,6 +432,10 @@ if [ "${OYA_QUIET_BANNER:-0}" != "1" ]; then
 
    3. Run the cycle as normal. Talk to Opus + Coda the way you do today.
       You may also talk to Oya directly in her pane (active mode).
+
+   4. Read Oya's answers in the OYA→OPERATOR pane — everything she says TO
+      you is mirrored there (${TARGET}/docs/agents/operator-channel.md), so
+      relay traffic in her pane can't scroll it away.
 
  If Oya did NOT auto-start (paste raced the TUI boot):
    - Focus the Oya pane and Cmd+V — the prompt is in your clipboard as fallback.

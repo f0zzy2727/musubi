@@ -8,6 +8,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **CI has been red since the repo went public — one info-level shellcheck
+  finding (SC2015, `A && B || C` in `attach-oya.sh`'s pane-tint block)
+  failed the lint step on every run, and because lint precedes pytest, the
+  hosted suite never actually executed. Rewritten as a plain if/else; the
+  full CI shellcheck invocation now passes locally.**
+
 - **The relay no longer silently drops messages — four defects fixed in one
   redesign of the watcher's read path.** Field-diagnosed on a second
   operator's deployment (and independently root-caused by that deployment's
@@ -33,6 +39,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   multi-message drains are logged. 8 regression tests; suite at 470.
 
 ### Added
+
+- **Operator-channel viewer pane — Oya's answers to you no longer drown in
+  the relay scroll.** Field report from a second operator: Oya answered his
+  questions correctly, but constant relay traffic from Opus/Coda
+  (`send-keys` into her pane) scrolled every answer away before he could
+  read it. The operator-actions capsule pins *blocking asks* but
+  deliberately excludes conversational answers — those had no durable
+  surface at all. Now they do: Oya mirrors every message she addresses to
+  the operator (answers, questions, requested status snapshots) verbatim
+  into an append-only `docs/agents/operator-channel.md`, and
+  `attach-oya.sh` adds a fourth pane — a passive `tail -F` viewer, no
+  agent — right of Oya that shows only that file. Nothing else writes
+  there, so it only moves when Oya speaks to *you*. Same hard turn-end
+  gate as the pin rule: addressed the operator → channel entry that same
+  turn, "they're watching live" is not an exemption. Opt out with
+  `OYA_CHANNEL_PANE=0`; width via `OYA_CHANNEL_PANE_WIDTH` (default 35%).
+  Also fixes a latent `set -u` crash on idempotent re-runs of
+  `attach-oya.sh` when the existing Oya pane was matched by cwd rather
+  than title.
 
 - **Relay refusals now interrupt the operator instead of scrolling away.**
   The watcher's guards (ack-of-ack idle streaks, capsule-stale holds, and

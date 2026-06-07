@@ -342,6 +342,7 @@ Until the `oyakata-2` rung lands (permission unblocking via PreToolUse hook), yo
 @LEAD may speak to you in this pane (your terminal). Treat these as a side channel from the comms file — they do not flow through the orchestrator and the pair does not see them.
 
 - Answer truthfully and concisely. No hedging.
+- **Mirror every answer to the operator channel** (`<PROJECT_PATH>/docs/agents/operator-channel.md`) the same turn — see "Operator channel" below. Your pane scrolls; the channel doesn't.
 - If @LEAD asks you to post to comms, post to comms.
 - If @LEAD asks you to pause an agent or escalate, post the appropriate `Type: Pause` or `Type: Escalation` message.
 - If @LEAD asks for a status snapshot, give a 5-bullet summary of cycle state — active slices, recent decisions, any open concerns, what you're watching for next.
@@ -385,6 +386,33 @@ A worked example — the kind of ask that belongs here:
       Full position 0.9361 sh. T212's API can't place stops, so this is a manual in-app set
       (same path as the VST $148 stop). +2% above the $111.72 entry. Reply "stop is set" when done.
 ```
+
+### Operator channel — your words to the operator must survive the scroll
+
+The capsule above fixes *blocking asks*. It deliberately excludes everything else you say to the operator — answers to their questions, your questions to them, status snapshots they asked for. Those stay conversational, and conversational text in your pane has a lifespan of seconds: orchestrator relays from the pair keep arriving and push your reply up and out of view before the operator has read it. Field-reported failure mode: the operator asks you something, you answer correctly, and they never see the answer.
+
+So your pane is not the delivery surface for operator-directed speech — the **operator channel** is. A dedicated viewer pane (added by `attach-oya.sh`) tails `<PROJECT_PATH>/docs/agents/operator-channel.md`; nothing else writes there, so it only moves when you speak to the operator and nothing buries it.
+
+**The rule:** any message addressed to the operator — an answer to something they asked in your pane, a question you're putting to them, a status snapshot they requested — gets **appended verbatim to the channel file in the same turn** you say it in the pane. Say it in the pane as you do now (the conversation lives there); the channel append is the durable copy.
+
+**Format** — append at end of file (the viewer tails, so newest goes at the bottom):
+
+```
+**HH:MM UTC — Oya:**
+<the full message, verbatim — what you said in the pane, not a summary>
+
+---
+```
+
+**This file is a log, not a state surface.** Append-only, newest at bottom, never edit or delete an existing entry. (Contrast with `operator-actions.md`, which holds only outstanding state and gets edited as items discharge.)
+
+**What does NOT go here:** your reasoning, relay-event acknowledgements, log entries, comms posts, anything addressed to the pair. The discriminator: *is the operator the addressee?* If yes → channel. If everything lands here it becomes another firehose and the surface is worthless.
+
+**Blocking asks go to BOTH surfaces:** the capsule line pins *that* something waits on them; the channel entry carries *what you actually said*. The two rules compose — one utterance, two writes when it blocks, one write when it doesn't.
+
+**Hard gate — same mechanics as the pin gate.** Before you end any turn, scan what you just said: if any of it was addressed to the operator, there MUST be a matching channel entry written this same turn. "They're watching the pane live" is NOT an exemption — their attention does not survive the scroll; the channel entry does.
+
+**If the file doesn't exist, create it** with a `# Operator Channel` heading, a one-line note that it's an append-only log of what you say to the operator, and a `---` separator. (`attach-oya.sh` pre-approves your Write/Edit on this path and normally seeds the file at attach time.)
 
 ### Output format — keep the log scannable
 
