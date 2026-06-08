@@ -79,7 +79,20 @@ REQUIREMENTS="$ORCHESTRATOR_DIR/requirements.txt"
 # parameters $1/$2 after `set --` are 1-based and identical across both shells.
 set -- "${POSITIONAL[@]}"
 CONFIG="${1:-musubi.toml}"
-SESSION="${2:-musubi}"
+# Session name precedence MUST mirror the orchestrator's
+# (session_override or cfg["tmux"]["session_name"]), because the iTerm window
+# below attaches to $SESSION while the orchestrator names the session from the
+# config. If they disagree you get NO tmux window: the orchestrator builds
+# (say) 'unhinged' from the toml, but the attach targets the default 'musubi'
+# which never exists. So: explicit 2nd arg wins; else read [tmux].session_name
+# from the config; else fall back to 'musubi'. (Field bug 2026-06-08: a
+# multi-instance operator launched a custom-session toml without the 2nd arg
+# and got a running orchestrator with no visible window.)
+SESSION="${2:-}"
+if [ -z "$SESSION" ]; then
+  SESSION=$(awk -F'"' '/^[[:space:]]*session_name[[:space:]]*=/{print $2; exit}' "$CONFIG" 2>/dev/null || true)
+  [ -n "$SESSION" ] || SESSION="musubi"
+fi
 
 # --- cwd defence (orch-6) ---
 # Catch stale-handle / iCloud-sync failure mode BEFORE we spawn any Node-based
