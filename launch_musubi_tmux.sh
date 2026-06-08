@@ -57,7 +57,13 @@ done
 ORCHESTRATOR_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_PATH="$ORCHESTRATOR_DIR/.venv"
 REQUIREMENTS="$ORCHESTRATOR_DIR/requirements.txt"
-CONFIG="${POSITIONAL[0]:-musubi.toml}"
+CONFIG="${POSITIONAL[0]:-}"
+# When no config is named and several musubi*.toml exist, ask which session to
+# start instead of silently defaulting. Prompts only on multiple-and-no-arg;
+# one config (or an explicit arg) returns silently — backward compatible.
+if [ -z "$CONFIG" ]; then
+  CONFIG=$("$ORCHESTRATOR_DIR/scripts/pick-config.sh" "" "$ORCHESTRATOR_DIR")
+fi
 SESSION="${POSITIONAL[1]:-}"
 
 # --- cwd defence (orch-6) ---

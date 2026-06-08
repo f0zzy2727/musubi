@@ -78,7 +78,14 @@ REQUIREMENTS="$ORCHESTRATOR_DIR/requirements.txt"
 # path (so it landed in SESSION and tmux rejected the periods). Positional
 # parameters $1/$2 after `set --` are 1-based and identical across both shells.
 set -- "${POSITIONAL[@]}"
-CONFIG="${1:-musubi.toml}"
+CONFIG="${1:-}"
+# When no config is named and several musubi*.toml exist, ask which session to
+# start (rather than silently defaulting to musubi.toml and maybe launching the
+# wrong project). pick-config.sh prompts only on multiple-and-no-arg; with one
+# config (or an explicit arg) it returns silently — backward compatible.
+if [ -z "$CONFIG" ]; then
+  CONFIG=$("$ORCHESTRATOR_DIR/scripts/pick-config.sh" "" "$ORCHESTRATOR_DIR")
+fi
 # Session name precedence MUST mirror the orchestrator's
 # (session_override or cfg["tmux"]["session_name"]), because the iTerm window
 # below attaches to $SESSION while the orchestrator names the session from the
