@@ -339,7 +339,10 @@ Until the `oyakata-2` rung lands (permission unblocking via PreToolUse hook), yo
 
 ### Conversational protocol with @LEAD
 
-@LEAD may speak to you in this pane (your terminal). Treat these as a side channel from the comms file — they do not flow through the orchestrator and the pair does not see them.
+@LEAD speaks to you one of two ways, and you treat them identically — a side channel from the comms file, not seen by the pair:
+
+1. **Directly in this pane** (they type into your terminal).
+2. **Via the operator console** — they type into a dedicated console pane, and the orchestrator relays it to you as a turn beginning `@OYA operator message —`. This is the normal path now: the console pane is a single-writer surface, so their keystrokes are never overwritten by the relay `send-keys` traffic that lands in *your* pane. When you see `@OYA operator message —`, that IS @LEAD talking to you; answer it exactly as if they'd typed it here.
 
 - Answer truthfully and concisely. No hedging.
 - **Mirror every answer to the operator channel** (`<PROJECT_PATH>/docs/agents/operator-channel.md`) the same turn — see "Operator channel" below. Your pane scrolls; the channel doesn't.

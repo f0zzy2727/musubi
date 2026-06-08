@@ -66,6 +66,85 @@ def resolve_operator_actions_path(cfg):
     return os.path.join(cfg.get("project", {}).get("path", "."), rel)
 
 
+def operator_input_enabled(cfg):
+    """True when Oya is enabled AND the operator-input relay is on.
+
+    Defaults ON when Oya is enabled. The input relay is the other half of the
+    operator console: the channel pane carries Oya's words OUT, this carries
+    the operator's words IN — typed into a dedicated console pane (nothing
+    else writes there) instead of Oya's own relay-fed pane, where send-keys
+    traffic overwrites mid-typed input. Opt out with
+    `[agents.oyakata].operator_input = false`."""
+    if not oyakata_enabled(cfg):
+        return False
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    return bool(oya.get("operator_input", True))
+
+
+def resolve_operator_input_path(cfg):
+    """Absolute path to the operator-input log. Relative paths resolve against
+    project.path — same convention as the operator-actions capsule. The
+    console pane appends to this file; the orchestrator watches it and relays
+    new entries to Oya. Append-only log, not a state surface."""
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    rel = oya.get("operator_input_path", "docs/agents/operator-input.md")
+    if os.path.isabs(rel):
+        return rel
+    return os.path.join(cfg.get("project", {}).get("path", "."), rel)
+
+
+# An operator-input entry header, written by scripts/operator-console.sh on
+# each submit: `**HH:MM UTC — Operator:**` on its own line, the message on the
+# following lines, terminated by the next header or EOF. The orchestrator
+# splits newly-appended text on this header to relay one message per submit.
+_OPERATOR_INPUT_HEADER_RE = re.compile(
+    r"^\*\*\d{2}:\d{2}\s*UTC\s*—\s*Operator:\*\*\s*$", re.MULTILINE
+)
+
+
+def parse_operator_input(new_text):
+    """Split a freshly-appended span of operator-input.md into message bodies.
+
+    Returns an ordered list of message strings (the operator's prose, header
+    and surrounding blank lines stripped). Empty entries are dropped. Best-
+    effort: text before the first header (e.g. a file preamble that slipped
+    into the read span) is ignored, since a real submit always starts with a
+    header."""
+    if not new_text:
+        return []
+    msgs = []
+    # Split keeping order; the first chunk is pre-header preamble — discard it.
+    parts = _OPERATOR_INPUT_HEADER_RE.split(new_text)
+    for body in parts[1:]:
+        cleaned = body.strip()
+        if cleaned:
+            msgs.append(cleaned)
+    return msgs
+
+
+def relay_operator_input_to_oyakata(message, p_oyakata, cfg):
+    """Forward one operator-console message to Oya's pane as a relay.
+
+    This is the input half of the operator console. The operator typed this
+    into the console pane (not Oya's pane), so it arrives here as a file event
+    and we inject it the same way the orchestrator injects comms relays. Oya
+    treats it exactly like @LEAD speaking in her pane: answer, and mirror the
+    answer to the operator channel per her prompt."""
+    from orchestrator import send_message  # lazy import to avoid cycle
+    if p_oyakata is None:
+        return
+    notification = (
+        f"@OYA operator message — the operator typed this to you in the "
+        f"console pane:\n\n{message}\n\n"
+        f"Treat it exactly as @LEAD speaking in your pane: answer truthfully "
+        f"and concisely, and mirror your answer verbatim to the operator "
+        f"channel the same turn (per your prompt's Operator-channel rule) so "
+        f"it survives the scroll. If it's a bounded blocking ask back to them, "
+        f"pin it to operator-actions.md too."
+    )
+    send_message(p_oyakata, notification, cfg)
+
+
 # Path-substring marker used to identify musubi-managed PreToolUse entries
 # in the project's `.claude/settings.local.json`. The auto-wirer locates
 # entries to update vs append by looking for this token in the nested

@@ -38,6 +38,10 @@
 #       the append-only log where Oya mirrors everything she says to the
 #       operator, so her answers survive the relay scroll (OYA_CHANNEL_PANE=0
 #       to skip)
+#   6c. Splits a fifth pane under the channel running operator-console.sh —
+#       the operator types to Oya HERE (single-writer pane) instead of her
+#       relay-fed pane where send-keys overwrites input; each submit is relayed
+#       to Oya by the orchestrator (OYA_INPUT_PANE=0 to skip)
 #   7. Labels the new pane as Oyakata; copies the v0.1 prompt to the clipboard
 #   8. Prints next-step instructions
 #
@@ -79,8 +83,28 @@ OYA_TINT_BG="${OYA_TINT_BG:-colour236}"
 # and nothing scrolls it away. OYA_CHANNEL_PANE=0 skips the viewer; the
 # width is the % of the window the viewer takes from the Oya row's right.
 OYA_CHANNEL_PANE="${OYA_CHANNEL_PANE:-1}"
-OYA_CHANNEL_PANE_WIDTH="${OYA_CHANNEL_PANE_WIDTH:-35}"
+# By default the channel pane is sized to EXACTLY match the width of the pane
+# directly below it (Coda), so the right column (channel + console) lines up
+# with the Opus|Coda divider into one clean vertical strip — no mid-span
+# offset. A fixed percentage can't guarantee this: tmux's even Opus|Coda split
+# and a `-l 50%` channel split round the border column differently (off by
+# one). Set OYA_CHANNEL_MATCH_CODA=0 to fall back to the OYA_CHANNEL_PANE_WIDTH
+# percentage instead.
+OYA_CHANNEL_MATCH_CODA="${OYA_CHANNEL_MATCH_CODA:-1}"
+OYA_CHANNEL_PANE_WIDTH="${OYA_CHANNEL_PANE_WIDTH:-50}"
 OYA_CHANNEL_TITLE="OYA → OPERATOR · channel"
+
+# Operator-input console pane (oyakata-11). The input half of the operator
+# console: a dedicated pane, split UNDER the channel pane, running
+# operator-console.sh. The operator types to Oya here — into a pane with
+# exactly one writer — instead of Oya's own pane, where relay `send-keys`
+# traffic overwrites mid-typed input (field report 2026-06-08). Each submit
+# appends to operator-input.md; the orchestrator relays it to Oya.
+# OYA_INPUT_PANE=0 skips it; the height is the % of the channel column the
+# console takes from the bottom.
+OYA_INPUT_PANE="${OYA_INPUT_PANE:-1}"
+OYA_INPUT_PANE_HEIGHT="${OYA_INPUT_PANE_HEIGHT:-30}"
+OYA_INPUT_TITLE="YOU → OYA · console"
 
 # --- Helpers ------------------------------------------------------
 # Log format mirrors the orchestrator's [HH:MM:SS] [COMPONENT] message convention
@@ -140,6 +164,9 @@ log "project: $TARGET"
 # Operator-channel file — same fixed project-relative location the prompt and
 # the pre-approved permissions below use. Lives next to operator-actions.md.
 CHANNEL_FILE="$TARGET/docs/agents/operator-channel.md"
+# Operator-input file — the console pane appends here; the orchestrator relays
+# new entries to Oya. Append-only log, sibling of the channel file.
+INPUT_FILE="$TARGET/docs/agents/operator-input.md"
 
 # Verify [agents.oyakata].enabled = true — without this the orchestrator won't
 # relay events to Oya's pane and she'll be alive but blind. The prompt's
@@ -343,18 +370,46 @@ if [ "$OYA_CHANNEL_PANE" = "1" ]; then
     fi
     log "created operator-channel file: $CHANNEL_FILE"
   fi
-  # Idempotency: unlike the agent panes, the viewer runs tail (not a TUI),
-  # so the title we set is never overwritten — title match is reliable here.
+  # Idempotency: unlike the agent panes, the viewer runs a follower (not a
+  # TUI), so the title we set is never overwritten — title match is reliable.
   if tmux list-panes -t "$SESSION" -F "#{pane_title}" | grep -qF "$OYA_CHANNEL_TITLE"; then
     log "operator-channel viewer pane already exists"
   else
-    log "adding operator-channel viewer pane (right of Oya, ${OYA_CHANNEL_PANE_WIDTH}% width) ..."
-    channel_id=$(tmux split-window -t "$oyakata_id" -h -l "${OYA_CHANNEL_PANE_WIDTH}%" \
+    # Prefer the markdown-rendering follower (strips **/---, word-wraps,
+    # bolds headers) so the pane reads as prose, not raw markdown. Fall back
+    # to plain `tail -F` when python3 isn't on PATH — a progressive
+    # enhancement, never a hard dependency.
+    CHANNEL_VIEW_SCRIPT="$MUSUBI_ROOT/scripts/channel-view.py"
+    if command -v python3 >/dev/null 2>&1 && [ -f "$CHANNEL_VIEW_SCRIPT" ]; then
+      channel_cmd="python3 '$CHANNEL_VIEW_SCRIPT' '$CHANNEL_FILE' --tail 100"
+    else
+      channel_cmd="tail -n 100 -F '$CHANNEL_FILE'"
+    fi
+    # Decide the channel width. Default: match the width of the bottom-right
+    # pane (Coda) exactly, so the right column aligns with the Opus|Coda
+    # divider. We find Coda as the bottom-most, right-most pane (greatest
+    # pane_top, then greatest pane_left) — at this point the only panes are
+    # Oya (top) + the pair (bottom row). Fall back to the percentage if the
+    # query fails or the match is disabled.
+    channel_size_arg="-l ${OYA_CHANNEL_PANE_WIDTH}%"
+    channel_size_fallback="-p $OYA_CHANNEL_PANE_WIDTH"
+    if [ "$OYA_CHANNEL_MATCH_CODA" = "1" ]; then
+      coda_width=$(tmux list-panes -t "$SESSION" -F "#{pane_top} #{pane_left} #{pane_width}" \
+                   | sort -k1,1n -k2,2n | tail -1 | awk '{print $3}')
+      if [ -n "$coda_width" ] && [ "$coda_width" -gt 0 ] 2>/dev/null; then
+        channel_size_arg="-l $coda_width"
+        channel_size_fallback="-l $coda_width"
+        log "channel width matched to Coda (${coda_width} cols)"
+      fi
+    fi
+    log "adding operator-channel viewer pane (right of Oya) ..."
+    # shellcheck disable=SC2086  # channel_size_arg is an intentional flag+value pair
+    channel_id=$(tmux split-window -t "$oyakata_id" -h $channel_size_arg \
                                    -P -F "#{pane_id}" \
-                                   "tail -n 100 -F '$CHANNEL_FILE'" 2>/dev/null \
-                || tmux split-window -t "$oyakata_id" -h -p "$OYA_CHANNEL_PANE_WIDTH" \
+                                   "$channel_cmd" 2>/dev/null \
+                || tmux split-window -t "$oyakata_id" -h $channel_size_fallback \
                                      -P -F "#{pane_id}" \
-                                     "tail -n 100 -F '$CHANNEL_FILE'")
+                                     "$channel_cmd")
     tmux select-pane -t "$channel_id" -T "$OYA_CHANNEL_TITLE"
     # Keep keyboard focus on the Oya pane — the viewer is read-only.
     tmux select-pane -t "$oyakata_id"
@@ -362,6 +417,50 @@ if [ "$OYA_CHANNEL_PANE" = "1" ]; then
   fi
 else
   log "operator-channel viewer pane disabled (OYA_CHANNEL_PANE=$OYA_CHANNEL_PANE)"
+fi
+
+# --- Step 6c: operator-input console pane (idempotent) ------------
+# A fifth pane, split UNDER the channel pane, running operator-console.sh.
+# The operator types to Oya here — a pane with exactly one writer — so relay
+# send-keys traffic can never overwrite mid-typed input (the bug the channel
+# pane alone didn't fix). Each submit appends to operator-input.md, which the
+# orchestrator relays to Oya. Like the channel pane: no agent, idempotent by
+# title, independent of FRESH_OYA.
+if [ "$OYA_INPUT_PANE" = "1" ]; then
+  CONSOLE_SCRIPT="$MUSUBI_ROOT/scripts/operator-console.sh"
+  if [ ! -x "$CONSOLE_SCRIPT" ] && [ ! -f "$CONSOLE_SCRIPT" ]; then
+    log "operator-input console disabled — $CONSOLE_SCRIPT not found"
+  elif tmux list-panes -t "$SESSION" -F "#{pane_title}" | grep -qF "$OYA_INPUT_TITLE"; then
+    log "operator-input console pane already exists"
+  else
+    # Seed the input file (header explains the surface; never overwritten).
+    if [ ! -f "$INPUT_FILE" ]; then
+      mkdir -p "$(dirname "$INPUT_FILE")"
+      if [ -f "$MUSUBI_ROOT/templates/operator-input.md" ]; then
+        cp "$MUSUBI_ROOT/templates/operator-input.md" "$INPUT_FILE"
+      else
+        printf '# Operator Input\n\n> Append-only log of what the operator types to Oya.\n\n---\n' > "$INPUT_FILE"
+      fi
+      log "created operator-input file: $INPUT_FILE"
+    fi
+    # Split under the channel pane when it exists, else under Oya's pane.
+    input_target=$(tmux list-panes -t "$SESSION" -F "#{pane_id} #{pane_title}" \
+                   | grep -F "$OYA_CHANNEL_TITLE" | awk '{print $1; exit}')
+    [ -n "$input_target" ] || input_target="$oyakata_id"
+    log "adding operator-input console pane (under channel, ${OYA_INPUT_PANE_HEIGHT}% height) ..."
+    console_id=$(tmux split-window -t "$input_target" -v -l "${OYA_INPUT_PANE_HEIGHT}%" \
+                                   -P -F "#{pane_id}" \
+                                   "bash '$CONSOLE_SCRIPT' '$INPUT_FILE'" 2>/dev/null \
+                || tmux split-window -t "$input_target" -v -p "$OYA_INPUT_PANE_HEIGHT" \
+                                     -P -F "#{pane_id}" \
+                                     "bash '$CONSOLE_SCRIPT' '$INPUT_FILE'")
+    tmux select-pane -t "$console_id" -T "$OYA_INPUT_TITLE"
+    # Focus the console — it's where the operator now types to Oya.
+    tmux select-pane -t "$console_id"
+    log "operator-input console pane created: $console_id (appends $INPUT_FILE)"
+  fi
+else
+  log "operator-input console pane disabled (OYA_INPUT_PANE=$OYA_INPUT_PANE)"
 fi
 
 # --- Step 7: auto-paste + auto-submit the v0.1 prompt -------------
@@ -415,12 +514,14 @@ if [ "${OYA_QUIET_BANNER:-0}" != "1" ]; then
 ────────────────────────────────────────────────────────────
  Oya attached (v0.1 active mode)
 
- Layout:
-   ┌──────────────────────────┬──────────────┐
-   │  OYAKATA · 親方          │ OYA→OPERATOR │   ← top (~38%): Oya + channel viewer
-   ├──────────────────┬───────┴──────────────┤
-   │  OPUS · Anthropic│  CODA · OpenAI       │   ← bottom, split half-half
-   └──────────────────┴──────────────────────┘
+ Layout (right column aligned with Coda below):
+   ┌──────────────────┬──────────────────┐
+   │  OYAKATA · 親方  │ OYA→OPERATOR     │   ← read Oya's replies (top-right)
+   │  (agent)         ├──────────────────┤
+   │                  │ YOU → OYA        │   ← type to Oya HERE (console)
+   ├──────────────────┼──────────────────┤
+   │  OPUS · Anthropic│  CODA · OpenAI   │   ← bottom, split half-half
+   └──────────────────┴──────────────────┘
 
  Next:
    1. Attach to musubi (skip if you're already attached):
@@ -431,11 +532,12 @@ if [ "${OYA_QUIET_BANNER:-0}" != "1" ]; then
       followed by her READY block in the log.
 
    3. Run the cycle as normal. Talk to Opus + Coda the way you do today.
-      You may also talk to Oya directly in her pane (active mode).
 
-   4. Read Oya's answers in the OYA→OPERATOR pane — everything she says TO
-      you is mirrored there (${TARGET}/docs/agents/operator-channel.md), so
-      relay traffic in her pane can't scroll it away.
+   4. Talk to Oya through the RIGHT COLUMN, not her own pane:
+      - type your message in the YOU → OYA console (bottom-right) and hit Enter
+      - read her reply in the OYA→OPERATOR pane (top-right)
+      Her own pane is fed by relay traffic, which overwrites anything you type
+      there — the console pane is yours alone, so it never gets clobbered.
 
  If Oya did NOT auto-start (paste raced the TUI boot):
    - Focus the Oya pane and Cmd+V — the prompt is in your clipboard as fallback.

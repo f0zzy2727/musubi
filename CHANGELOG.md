@@ -40,6 +40,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The channel pane now renders Oya's markdown instead of showing it raw.**
+  The `OYA → OPERATOR` pane ran a plain `tail -F`, so the operator saw the
+  file's markup verbatim — literal `**` around every header, `---`
+  separators, and `tail`'s hard mid-word wraps at the pane edge (field note:
+  "not really human language"; the words were fine, the rendering wasn't).
+  It now runs `scripts/channel-view.py`: a zero-dependency follower that
+  strips inline `**bold**`/`*italic*`/`` `code` ``, turns `**… — Oya:**`
+  headers into bold coloured lines, renders `---` as a horizontal rule, and
+  word-wraps to the pane width without breaking words or hyphenated tokens.
+  It re-opens on truncation/recreation like `tail -F`, **re-renders the
+  visible tail on terminal resize (SIGWINCH)** so lines reflow to the new
+  pane width instead of staying wrapped at the old one, and `attach-oya.sh`
+  falls back to plain `tail` when python3 isn't on PATH — a progressive
+  enhancement, not a new dependency. 10 tests (`tests/test_channel_view.py`).
+
+- **Operator console — the operator now types to Oya in a pane of their own,
+  not in her relay-fed pane.** Follow-up to the channel pane from the same
+  second operator: the channel fixed Oya's answers scrolling away (output),
+  but the *input* was still clobbered — he typed into Oya's pane while the
+  orchestrator `send-keys`-relayed pair traffic into that same pane, and his
+  keystrokes got overwritten mid-line. His own fix instinct ("put the input
+  on the fourth screen") was right. Now `attach-oya.sh` adds a fifth pane —
+  a console (`scripts/operator-console.sh`) under the channel pane — with
+  exactly one writer: him. Each line he submits is appended to
+  `docs/agents/operator-input.md`; the orchestrator watches that file and
+  relays each entry into Oya's pane (the same path comms relays take), and
+  she answers + mirrors to the channel he reads above. The whole
+  operator↔Oya loop (type below → Oya → read above) never touches the
+  relay-fed pane, which also fixes the side effect that scrolled-up copy in
+  Oya's pane kept snapping back to the bottom (that was the relay redraw).
+  Opt out with `OYA_INPUT_PANE=0` (pane) or
+  `[agents.oyakata].operator_input = false` (relay); height via
+  `OYA_INPUT_PANE_HEIGHT`. 12 tests (`tests/test_operator_input.py`); suite
+  at 482.
+
 - **Operator-channel viewer pane — Oya's answers to you no longer drown in
   the relay scroll.** Field report from a second operator: Oya answered his
   questions correctly, but constant relay traffic from Opus/Coda

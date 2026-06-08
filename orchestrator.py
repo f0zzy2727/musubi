@@ -61,6 +61,10 @@ from oyakata import (
     flag_disciplines_to_oyakata,
     operator_actions_enabled,
     resolve_operator_actions_path,
+    operator_input_enabled,
+    resolve_operator_input_path,
+    parse_operator_input,
+    relay_operator_input_to_oyakata,
 )
 
 
@@ -1208,6 +1212,25 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     else:
         oa_status_text = ""
 
+    # Operator-input relay (oyakata-11). The input half of the operator
+    # console: the console pane appends the operator's messages to
+    # operator-input.md, and we relay each new entry into Oya's pane — exactly
+    # the path comms relays take. The operator types into a single-writer pane
+    # instead of Oya's relay-fed pane, so their keystrokes are never
+    # overwritten by send-keys traffic. Append-only log: we track a byte offset
+    # and relay only newly-appended entries, priming the offset to current EOF
+    # so pre-existing content isn't replayed on boot.
+    oi_active = operator_input_enabled(cfg) and session is not None
+    oi_path = resolve_operator_input_path(cfg) if oi_active else None
+    oi_offset = 0
+    if oi_active:
+        try:
+            oi_offset = os.path.getsize(oi_path)
+        except FileNotFoundError:
+            oi_offset = 0
+        print(f"[{ts()}] [INPUT] operator-input relay active — watching "
+              f"{oi_path}")
+
     # Relay-health surface (orch-8). A refusing relay is invisible from the
     # agent panes — the operator experiences it as "the relay is broken" and
     # starts hand-carrying messages by hand. Track refusals per guard since
@@ -1455,6 +1478,28 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                     oa_seen_keys |= {a["key"] for a in pending}
                     oa_status_text = format_actions_status(pending)
                     _pin_status()
+
+            # Operator-input relay (oyakata-11): when the console pane appends
+            # the operator's message(s) to operator-input.md, relay each new
+            # entry into Oya's pane. Only fires once the Oya pane is known —
+            # before that the operator's words would have nowhere to land, so
+            # we hold the offset and deliver when the pane appears.
+            if oi_active and p_oyakata is not None:
+                try:
+                    cur_oi_size = os.path.getsize(oi_path)
+                except FileNotFoundError:
+                    cur_oi_size = 0
+                if cur_oi_size < oi_offset:
+                    # File shrank/recreated — reset so we don't miss new input.
+                    oi_offset = 0
+                if cur_oi_size > oi_offset:
+                    new_input = read_new_content(oi_path, oi_offset)
+                    oi_offset = cur_oi_size
+                    for msg in parse_operator_input(new_input):
+                        relay_operator_input_to_oyakata(msg, p_oyakata, cfg)
+                        oya_pending_count += 1
+                        _log("INPUT", f"relayed operator message to Oya "
+                                      f"({len(msg)} chars)")
 
             # Tier-2 pending-decision relay (oyakata-2 slice 3).
             # Hook writes a request file when a tool call falls outside the
