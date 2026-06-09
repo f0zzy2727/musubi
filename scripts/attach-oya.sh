@@ -427,7 +427,20 @@ fi
 # orchestrator relays to Oya. Like the channel pane: no agent, idempotent by
 # title, independent of FRESH_OYA.
 if [ "$OYA_INPUT_PANE" = "1" ]; then
-  CONSOLE_SCRIPT="$MUSUBI_ROOT/scripts/operator-console.sh"
+  # Prefer the Python console (operator-console.py) — it reads the pane in plain
+  # cooked mode and coalesces a paste burst into one message, fixing the bash
+  # 3.2 readline paste bug (multi-line/long paste relayed only its first line,
+  # repeated — field report 2026-06-09). Fall back to operator-console.sh when
+  # python3 isn't on PATH, mirroring the channel pane's tail fallback.
+  CONSOLE_PY="$MUSUBI_ROOT/scripts/operator-console.py"
+  CONSOLE_SH="$MUSUBI_ROOT/scripts/operator-console.sh"
+  if command -v python3 >/dev/null 2>&1 && [ -f "$CONSOLE_PY" ]; then
+    console_cmd="python3 '$CONSOLE_PY' '$INPUT_FILE'"
+    CONSOLE_SCRIPT="$CONSOLE_PY"
+  else
+    console_cmd="bash '$CONSOLE_SH' '$INPUT_FILE'"
+    CONSOLE_SCRIPT="$CONSOLE_SH"
+  fi
   if [ ! -x "$CONSOLE_SCRIPT" ] && [ ! -f "$CONSOLE_SCRIPT" ]; then
     log "operator-input console disabled — $CONSOLE_SCRIPT not found"
   elif tmux list-panes -t "$SESSION" -F "#{pane_title}" | grep -qF "$OYA_INPUT_TITLE"; then
@@ -450,10 +463,10 @@ if [ "$OYA_INPUT_PANE" = "1" ]; then
     log "adding operator-input console pane (under channel, ${OYA_INPUT_PANE_HEIGHT}% height) ..."
     console_id=$(tmux split-window -t "$input_target" -v -l "${OYA_INPUT_PANE_HEIGHT}%" \
                                    -P -F "#{pane_id}" \
-                                   "bash '$CONSOLE_SCRIPT' '$INPUT_FILE'" 2>/dev/null \
+                                   "$console_cmd" 2>/dev/null \
                 || tmux split-window -t "$input_target" -v -p "$OYA_INPUT_PANE_HEIGHT" \
                                      -P -F "#{pane_id}" \
-                                     "bash '$CONSOLE_SCRIPT' '$INPUT_FILE'")
+                                     "$console_cmd")
     tmux select-pane -t "$console_id" -T "$OYA_INPUT_TITLE"
     # Focus the console — it's where the operator now types to Oya.
     tmux select-pane -t "$console_id"
