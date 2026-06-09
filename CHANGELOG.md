@@ -58,6 +58,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **One orchestrator per comms file — a second one on the same file now refuses
+  to boot instead of corrupting the relay.** Root cause behind the Oya-flood
+  bug: every orchestrator truncates its active comms file to zero bytes at boot
+  (`archive_and_reset_comms`), so a second orchestrator pointed at a comms file
+  a live peer is mid-cycle on would zero it underneath them — the other process
+  saw the shrink, reset its read offset, and replayed the whole cycle (and both
+  send-keys into the same panes). This happens with a leaked/duplicate
+  orchestrator on one instance, or two tomls pointing at one project; it does
+  NOT happen for two genuinely distinct projects (distinct comms files). The
+  orchestrator now claims a lockfile beside its comms file at boot; if a live
+  peer already holds it, it refuses with an actionable error naming the peer's
+  PID/session. A stale lock (owning PID dead — e.g. `kill -9` or a `SIGTERM`
+  restart) is taken over, so a crash never wedges future launches. Applies to
+  both fresh launches and `--attach` resumes. The lock is released on clean
+  exit. 9 tests (`tests/test_comms_lock.py`); suite at 503.
+
 - **The channel pane now renders Oya's markdown instead of showing it raw.**
   The `OYA → OPERATOR` pane ran a plain `tail -F`, so the operator saw the
   file's markup verbatim — literal `**` around every header, `---`

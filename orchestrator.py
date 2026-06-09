@@ -1,4 +1,6 @@
 import libtmux
+import atexit
+import json
 import select
 import subprocess
 import time
@@ -1789,6 +1791,134 @@ def brief_agents(p_claude, p_codex, cfg, latest_archive=None):
     send_message(p_codex, warm_start_brief(coda, opus), cfg)
     time.sleep(3)
 
+# ---------------------------------------------------------------------------
+# Comms-file lock — one orchestrator per comms file
+# ---------------------------------------------------------------------------
+# Two orchestrators pointed at the SAME comms file corrupt the relay: each one
+# truncates the active file to zero bytes at boot (archive_and_reset_comms), so
+# the other sees the file shrink, resets its read offset to 0, and re-drains the
+# whole cycle — plus both send-keys into the panes. This happens with a leaked /
+# duplicate orchestrator on one instance, or two tomls pointing at one project
+# (field bug 2026-06-09). A boot-time lock makes it structural: an orchestrator
+# claims its comms file, and a second one on the same file refuses to boot
+# rather than truncating under a live peer. Two DISTINCT projects have distinct
+# comms files and never contend. A stale lock (owning PID dead — e.g. kill -9)
+# is taken over, so a crash never wedges future launches.
+
+def _pid_alive(pid):
+    """True if a process with this PID exists (signal 0 probes without killing).
+    EPERM means it exists under another user — still alive."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def comms_lock_path(comms_file_abs):
+    """Lock file sits next to the comms file it guards."""
+    return comms_file_abs + ".orchestrator.lock"
+
+
+def read_comms_lock(lock_path):
+    """Parsed lock payload, or None if missing / unreadable / malformed."""
+    try:
+        with open(lock_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+# Lock paths this process owns — released on exit.
+_held_comms_locks = set()
+
+
+def acquire_comms_lock(comms_file_abs, session_name):
+    """Claim exclusive orchestrator ownership of a comms file.
+
+    Returns (True, lock_path) on success (no holder, our own re-acquire, or a
+    stale holder we take over). Returns (False, holder_dict) when a LIVE peer
+    orchestrator already owns it — the caller must refuse to boot."""
+    lock_path = comms_lock_path(comms_file_abs)
+    holder = read_comms_lock(lock_path)
+    if holder and holder.get("pid") != os.getpid() and _pid_alive(holder.get("pid")):
+        return (False, holder)
+    payload = {
+        "pid": os.getpid(),
+        "session": session_name,
+        "comms": comms_file_abs,
+        "started": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    tmp = lock_path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, lock_path)
+    except OSError as e:
+        # A lock we can't write shouldn't harden into a launch blocker — warn
+        # and proceed (the maxlen dedup still makes a re-read survivable).
+        _log("BOOT", f"could not write comms lock {lock_path}: {e!r} — proceeding without it")
+        return (True, lock_path)
+    _held_comms_locks.add(lock_path)
+    return (True, lock_path)
+
+
+def release_comms_lock(lock_path):
+    """Remove a lock this process owns (idempotent, best-effort)."""
+    holder = read_comms_lock(lock_path)
+    if holder and holder.get("pid") == os.getpid():
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
+    _held_comms_locks.discard(lock_path)
+
+
+@atexit.register
+def _release_all_comms_locks():
+    for lp in list(_held_comms_locks):
+        release_comms_lock(lp)
+
+
+def resolve_comms_abs(cfg):
+    """Absolute path to the active comms file — project-relative paths resolve
+    against project.path so the lock key is cwd-independent (two orchestrators
+    on one project agree on the key regardless of where they were launched)."""
+    comms_file = cfg["comms"]["file"]
+    if os.path.isabs(comms_file):
+        return comms_file
+    return os.path.join(cfg["project"]["path"], comms_file)
+
+
+def _guard_single_orchestrator(cfg, session_name):
+    """Acquire the comms lock or raise ConfigError naming the live peer."""
+    comms_abs = resolve_comms_abs(cfg)
+    ok, info = acquire_comms_lock(comms_abs, session_name)
+    if not ok:
+        raise ConfigError(
+            f"another musubi orchestrator is already running on this comms file:\n"
+            f"  {comms_abs}\n"
+            f"  held by PID {info.get('pid')}, session '{info.get('session')}', "
+            f"started {info.get('started')}.\n"
+            f"Two orchestrators on one comms file corrupt the relay — each truncates "
+            f"the other's file at boot and replays the whole cycle. Stop the other "
+            f"orchestrator first (or point this instance at a different project). If "
+            f"that PID is dead, delete the stale lock:\n"
+            f"  {comms_lock_path(comms_abs)}"
+        )
+
+
 def start_musubi(config_path="musubi.toml", session_override=None):
     cfg = load_config(config_path)
     project_path = cfg["project"]["path"]
@@ -1843,6 +1973,12 @@ def start_musubi(config_path="musubi.toml", session_override=None):
     # their own path based on the runbook's archive naming convention.
     comms_file = cfg["comms"]["file"]
     os.makedirs(os.path.dirname(comms_file), exist_ok=True)
+
+    # One orchestrator per comms file. Acquire the lock BEFORE the reset below
+    # truncates the file — refusing here prevents a second orchestrator from
+    # zeroing a comms file a live peer is mid-cycle on (the shrink that floods
+    # the relay). Stale locks (dead owner) are taken over inside acquire.
+    _guard_single_orchestrator(cfg, session_name)
 
     # Rotate the previous session's comms out of the way so the active file
     # starts each orchestrator launch at zero bytes — agents reading it on
@@ -2075,6 +2211,11 @@ def attach_to_musubi(config_path="musubi.toml", session_override=None):
     """
     cfg = load_config(config_path)
     session_name = session_override or cfg["tmux"]["session_name"]
+
+    # One orchestrator per comms file here too: --attach doesn't truncate, but
+    # two watchers on one comms file still double-relay into the panes. A live
+    # peer means this resume is a mistake — refuse rather than fight it.
+    _guard_single_orchestrator(cfg, session_name)
 
     server = libtmux.Server()
     matches = [s for s in server.sessions if s.name == session_name]
