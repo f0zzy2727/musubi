@@ -8,6 +8,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The relay no longer floods Oya with a whole cycle's old messages after a
+  comms-file shrink.** Field report from a second operator (Oya herself
+  flagged it): something external truncated+rewrote the active comms file
+  mid-cycle, so `current_size < last_offset` fired, the watcher reset the read
+  offset to 0 and re-drained the entire file — and the recently-relayed dedup
+  window was `maxlen=8`, far too small to recognise a full re-read as already
+  delivered. Every message older than the last 8 re-relayed to Oya, repeating
+  and growing on each shrink, burning her context and risking a real new
+  message getting buried. The dedup window is now `RECENTLY_RELAYED_WINDOW =
+  1000` (a named constant with the rationale), deep enough to cover a whole
+  cycle, so a shrink-triggered re-read recognises and skips everything already
+  delivered — no flood, and still no drops (refused blocks remain excluded per
+  the 2026-06-06 fix). Restarting the orchestrator was the only prior
+  mitigation. 2 regression tests guard the window size + re-read behaviour
+  (`tests/test_relay.py`); suite at 494. (The deeper question — what truncates
+  the file mid-cycle — is logged via `[WATCHER] Comms file shrank`; this fix
+  makes the re-read safe regardless of the trigger.)
+
 - **CI has been red since the repo went public — one info-level shellcheck
   finding (SC2015, `A && B || C` in `attach-oya.sh`'s pane-tint block)
   failed the lint step on every run, and because lint precedes pytest, the

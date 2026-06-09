@@ -27,9 +27,12 @@ from comms import (
     over_pattern,
     parse_result_field,
 )
+from collections import deque
+
 from orchestrator import (
     relay_instruction,
     send_message,
+    RECENTLY_RELAYED_WINDOW,
 )
 
 
@@ -82,6 +85,39 @@ def _message(sender_handle, body="Action: ship\nResult: completed\n", over="<OVE
         f"{body}"
         f"\n{over}\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Recently-relayed dedup window (re-read / shrink protection)
+# ---------------------------------------------------------------------------
+
+class TestRecentlyRelayedWindow:
+    """The dedup window must be deep enough to cover a whole-cycle re-read.
+
+    When something external truncates+rewrites active.txt mid-cycle, the
+    watcher re-reads from offset 0 and re-drains every block; only blocks still
+    inside this window are recognised as already-relayed and skipped. A
+    too-small window (the original 8) re-relayed every older message — flooding
+    Oya with the entire cycle on each shrink (field bug 2026-06-09). This guards
+    the size from silently regressing back down.
+    """
+
+    def test_window_covers_a_realistic_cycle(self):
+        # A busy cycle is hundreds of messages; 8 (the buggy value) is nowhere
+        # near enough. Require a substantial floor.
+        assert RECENTLY_RELAYED_WINDOW >= 500
+
+    def test_full_reread_of_a_long_span_dedups_every_block(self):
+        # Model the watcher's dedup: relay N(>old window) unique blocks, then a
+        # shrink-triggered re-read of the SAME blocks must skip all of them.
+        recently = deque(maxlen=RECENTLY_RELAYED_WINDOW)
+        blocks = [_message("@OPUS", body=f"Action: step {i}\n") for i in range(300)]
+        for b in blocks:
+            assert b not in recently  # first pass — all new
+            recently.append(b)
+        # Re-read (offset reset to 0): every block already seen → none re-relays.
+        re_relayed = [b for b in blocks if b not in recently]
+        assert re_relayed == [], "a full re-read must not re-relay already-seen blocks"
 
 
 # ---------------------------------------------------------------------------

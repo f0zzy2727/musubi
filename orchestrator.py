@@ -320,6 +320,16 @@ def validate_project_path(project_path):
 MANAGED_DOC_WARN_CHARS = 40_000
 MANAGED_DOC_REFUSE_CHARS = 100_000
 
+# Depth of the recently-relayed dedup window (see its use in watch_and_relay).
+# Must be at least one full cycle's worth of comms messages: when the active
+# comms file is truncated+rewritten mid-cycle by something external, the watcher
+# re-reads it from offset 0, and only blocks still inside this window are
+# recognised as already-relayed and skipped. Anything older re-relays — which is
+# how a too-small window (the original 8) flooded Oya with an entire cycle on
+# each shrink (field bug 2026-06-09). Sized for a realistic cycle with headroom;
+# the memory cost is bounded because comms is archived+reset at boot.
+RECENTLY_RELAYED_WINDOW = 1000
+
 
 def _managed_doc_paths(cfg):
     """Resolve the set of managed docs whose size is guarded on boot. Paths are
@@ -1101,13 +1111,13 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     print("Press Ctrl+C to stop.\n")
 
     last_offset = get_file_size(comms_file)
-    # Memory of recently-relayed blocks (multi-deep — the old single-block
-    # memory couldn't protect a multi-message span retry). Guards against
-    # re-delivery after a file shrink/rotation re-read and after a mid-drain
-    # failure retry. Deliberately NOT fed by guard refusals: a refused message
-    # that the agent fixes (capsule updated) and re-posts VERBATIM must relay,
-    # not vanish — field bug, 2026-06-06.
-    recently_relayed = deque(maxlen=8)
+    # Memory of recently-relayed blocks. Guards against re-delivery after a file
+    # shrink/rotation re-read (last_offset resets to 0 and the whole active
+    # comms file is re-drained) and after a mid-drain failure retry — the window
+    # must cover a whole cycle, see RECENTLY_RELAYED_WINDOW. Deliberately NOT fed
+    # by guard refusals: a refused message that the agent fixes (capsule updated)
+    # and re-posts VERBATIM must relay, not vanish — field bug, 2026-06-06.
+    recently_relayed = deque(maxlen=RECENTLY_RELAYED_WINDOW)
     last_size_seen = last_offset
     last_growth_time = time.time()
     nudged_at_size = None
