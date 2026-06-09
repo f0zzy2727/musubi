@@ -81,6 +81,22 @@ def operator_input_enabled(cfg):
     return bool(oya.get("operator_input", True))
 
 
+def contested_debate_enabled(cfg):
+    """True when Oya is enabled AND the contested-slice blind-debate spike is on.
+
+    Defaults OFF — this is a SPIKE (forced-debate mechanism #1, see
+    docs/positioning/collaboration-improvements-forced-debate.md), and a
+    stronger authority than the rest of v0.3-strategic: it has Oya HOLD a
+    barrier (both coders post a blind position before either reads the other)
+    rather than only advise. Opt in per bed with
+    `[agents.oyakata].contested_debate = true`, measure
+    `single_exchange_contested_rate` before/after, roll out only if it moves."""
+    if not oyakata_enabled(cfg):
+        return False
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    return bool(oya.get("contested_debate", False))
+
+
 def resolve_operator_input_path(cfg):
     """Absolute path to the operator-input log. Relative paths resolve against
     project.path — same convention as the operator-actions capsule. The

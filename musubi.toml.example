@@ -71,6 +71,16 @@ session_name = "musubi"                  # tmux session name — change if runni
 #     project.path. If omitted, Oya auto-discovers the recognised files
 #     (PRODUCT-VISION/VISION/PRD/README, docs/adr/*, ROADMAP/BACKLOG) and asks you
 #     on turn one if she finds none. Set this to guarantee she reads YOUR docs.
+# contested_debate = false                    # SPIKE, off by default
+#   ^ Opt into forced-debate mechanism #1 (blind position-commitment). When true,
+#     a `blast_radius: high` slice (state/schema/CI/UI/>300 LOC, per
+#     scripts/classify-slice.sh) that reaches review runs Oya's blind Phase 1/2:
+#     both coders commit a Position + Confidence to Oya BEFORE either reads the
+#     other, then Oya releases both and forces reconciliation. This is the one
+#     place Oya HOLDS a barrier rather than only advising — that's why it's opt-in.
+#     Measure single_exchange_contested_rate (scripts/comms-metrics.py) before/after
+#     and keep it only if it moves. See
+#     docs/positioning/collaboration-improvements-forced-debate.md.
 
 # --- Optional: [agents.oyakata.permissions] block (oyakata-2 PreToolUse hook) -
 # Auto-approves a small fixed allowlist of read-only operations on Opus's

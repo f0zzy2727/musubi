@@ -504,6 +504,23 @@ First file target:
 
 Downgrades are **forbidden** (catches "let me just slip this in" scope abuse): no heavy → lightweight, no lightweight → tiny mid-slice. Upgrades are **mandatory** the moment scope drifts past the current lane's criteria — the agent immediately re-issues the acceptance receipt at the higher lane and the fuller protocol kicks in. When unsure between two lanes, take the heavier one.
 
+**Blast radius is a second axis (not the lane).** `scripts/classify-slice.sh`
+also emits `blast_radius: high|low` — high = the change touches a
+destructive/irreversible surface (state / schema / CI / UI) or is >300 LOC. This
+is separate from the lane on purpose: a modest multi-file code edit is `heavy`
+lane but `low` blast radius. Nothing today gates on it except one opt-in spike:
+
+**Contested gear (opt-in spike, off by default).** When a bed sets
+`[agents.oyakata].contested_debate = true`, a `blast_radius: high` slice that
+reaches a review point runs Oya's **blind position-commitment** protocol: both
+coders post a Position + Confidence to Oya *before either reads the other*, then
+Oya releases both and opens reconciliation (forced-debate mechanism #1 — full
+spec in the Oya prompt + `docs/positioning/collaboration-improvements-forced-debate.md`).
+Echo `Slice: <id>` on the blind-position posts and the resulting Review Results
+so `scripts/comms-metrics.py` can group turns and score
+`single_exchange_contested_rate`. When the flag is off (the default), nothing
+changes — plain heavy-lane review applies.
+
 ### Before starting a slice
 
 1. Confirm the implementation plan is approved

@@ -135,21 +135,29 @@ REASONS=()
 HEAVY=false
 has_code=false
 all_doc_or_dep=true
+# blast_radius is a SEPARATE axis from the lane: "high" means the change touches
+# a destructive/irreversible surface (state / schema / CI / UI) or is large
+# (>300 LOC). The forced-debate mechanisms (see
+# docs/positioning/collaboration-improvements-forced-debate.md) gate on this,
+# NOT on the lane — a modest multi-file code edit is `heavy` lane but low blast
+# radius, and shouldn't trigger debate ceremony. "contested" is a separate,
+# runtime/social property (an agent objected) and is NOT classifiable here.
+BLAST=false
 
 for f in "${FILES[@]:-}"; do
   [ -z "$f" ] && continue
   # State files are also *.md, so check them BEFORE is_doc_or_dep.
   if is_state_file "$f"; then
-    HEAVY=true; REASONS+=("state file: $f"); all_doc_or_dep=false; continue
+    HEAVY=true; BLAST=true; REASONS+=("state file: $f"); all_doc_or_dep=false; continue
   fi
   if is_ci_file "$f"; then
-    HEAVY=true; REASONS+=("CI/workflow file: $f"); all_doc_or_dep=false; continue
+    HEAVY=true; BLAST=true; REASONS+=("CI/workflow file: $f"); all_doc_or_dep=false; continue
   fi
   if is_schema_file "$f"; then
-    HEAVY=true; REASONS+=("schema/migration: $f"); all_doc_or_dep=false; continue
+    HEAVY=true; BLAST=true; REASONS+=("schema/migration: $f"); all_doc_or_dep=false; continue
   fi
   if is_ui_file "$f"; then
-    HEAVY=true; REASONS+=("user-visible UI: $f"); all_doc_or_dep=false; continue
+    HEAVY=true; BLAST=true; REASONS+=("user-visible UI: $f"); all_doc_or_dep=false; continue
   fi
   if ! is_doc_or_dep "$f"; then
     has_code=true
@@ -158,8 +166,10 @@ for f in "${FILES[@]:-}"; do
 done
 
 if [ "$LOC" -gt 300 ]; then
-  HEAVY=true; REASONS+=("diff size: ${LOC} LOC (> 300)")
+  HEAVY=true; BLAST=true; REASONS+=("diff size: ${LOC} LOC (> 300)")
 fi
+
+if [ "$BLAST" = true ]; then BLAST_RADIUS="high"; else BLAST_RADIUS="low"; fi
 
 # A code change is only lightweight if it's a single file and ≤20 LOC; anything
 # larger or multi-file is heavy (matches the runbook's lightweight criteria).
@@ -191,6 +201,7 @@ fi
 if [ "$FORMAT" = "json" ]; then
   printf '{\n'
   printf '  "lane": "%s",\n' "$LANE"
+  printf '  "blast_radius": "%s",\n' "$BLAST_RADIUS"
   printf '  "loc": %s,\n' "$LOC"
   printf '  "file_count": %s,\n' "$FILE_COUNT"
   printf '  "reasons": ['
@@ -205,6 +216,7 @@ if [ "$FORMAT" = "json" ]; then
 else
   echo "=== Slice lane classification ==="
   echo "Lane: ${LANE}"
+  echo "Blast radius: ${BLAST_RADIUS}"
   echo "Files: ${FILE_COUNT} | LOC: ${LOC}"
   echo "Why:"
   for r in "${REASONS[@]:-}"; do

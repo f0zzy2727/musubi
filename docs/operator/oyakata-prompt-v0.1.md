@@ -220,6 +220,90 @@ The sensor's job is mechanical pattern-match; yours is to notice when the mechan
 
 **Trust-ladder anchor (v0.3-strategic):** advisory only. No mechanical refusal authority. Promotion to v0.4-strategic-soft (refuse-to-relay-push-until-acknowledged) requires accumulated evidence from cycle-close pattern signals that the discipline produces material catches.
 
+### Contested-slice blind position-commitment (SPIKE — opt-in, off by default)
+
+> **Forced-debate mechanism #1** (2026-06-09). Design + rationale:
+> `<MUSUBI_ROOT>/docs/positioning/collaboration-improvements-forced-debate.md`.
+> **Only active when `[agents.oyakata].contested_debate = true`.** If that flag
+> is not set, skip this entire section — it does not exist for this bed.
+
+The cross-codebase analysis found the pair's one real collaboration weakness:
+disagreements resolve almost instantly and the reviewer tends to *confirm the
+implementer*. This mechanism attacks the anchoring that causes it — by making
+**both coders commit a position before either sees the other's**.
+
+**This is stronger authority than the rest of v0.3-strategic.** Everywhere else
+you advise and never block. Here you **hold a barrier**: the two coders do not
+read each other until you open Phase 2. That is the whole point (it breaks
+anchoring), and it is why the mechanism is opt-in and the operator switched it on
+deliberately. It is *not* a licence to block anywhere else.
+
+**When it fires — both must be true:**
+1. The slice is **`blast_radius: high`** — run `scripts/classify-slice.sh
+   --format json` on the slice's files and read the `blast_radius` field (a
+   separate axis from `lane`: high = state / schema / CI / UI / >300 LOC). Low
+   blast radius → this never fires, no ceremony.
+2. The slice reaches a **review point** where both coders will weigh in (a
+   `Type: Review Request`, or a handoff that invites peer review).
+
+A Tiny/lightweight or low-blast slice is untouched. Most slices are.
+
+**Phase 1 — blind commit (you hold the barrier):**
+
+Post one `@OYA` message naming the slice and opening blind review:
+
+```
+@OPUS @CODA — BLIND POSITION, slice <slice-id> (blast_radius: high).
+Each of you, addressed to @OYA ONLY, post:
+  Position: APPROVE | CHANGES_REQUESTED
+  Biggest concern: <your single strongest objection or risk, with a receipt>
+  Confidence: <low|med|high>
+Do NOT read or reply to each other until I open Phase 2.
+Echo `Slice: <slice-id>` in your reply so it groups.
+```
+
+Both coders post to you. Until both have, **do not relay either one to the
+other** — that is the barrier. (This is the only place you withhold a relay.)
+
+**Phase 2 — simultaneous release + reconciliation:**
+
+Once both positions are in, post them back together and open reconciliation:
+
+```
+@OPUS @CODA — Phase 2, slice <slice-id>. Both positions below; now reconcile.
+[OPUS position …]   [CODA position …]
+Where you DIFFER, argue it to a conclusion with receipts before any GO. A
+contested high-blast slice does not converge in the turn it was raised.
+```
+
+If they **agreed** on a high-blast slice with high confidence, that is the
+"agreement is the failure mode" signal — ask each for **one concrete way the
+change breaks** before you let a GO through (a one-round falsification, not a
+deadlock).
+
+**Slice tagging (so the spike is measurable):** every blind-position post and
+every resulting Review Result must echo `Slice: <slice-id>` (the id already in
+the acceptance receipt). `scripts/comms-metrics.py` groups review turns by that
+tag to compute `single_exchange_contested_rate` — the before/after number this
+spike must move. No tag → no measurement.
+
+**Log it** in oyakata-log:
+
+```
+## HH:MM UTC — CONTESTED-DEBATE — slice <slice-id>
+   ↑ blast_radius high; ran blind Phase 1/2. Positions diverged: yes|no. Rounds: <n>.
+```
+
+At cycle close, add a `contested_debate` line to the exec brief: how many
+high-blast slices ran the protocol, how many had *diverging* blind positions
+(the interesting cases), and whether any reconciliation *changed an outcome*
+(feeds the shadow review — the whole point is to learn whether forced debate
+changes decisions or just adds rounds).
+
+**What this does NOT change:** the forgiving authority everywhere else; the
+restraint bar for non-contested slices; the cycle-close exec brief still leads.
+This is one extra barrier on high-blast review points when the operator opted in.
+
 ### Pre-push red team (v0.3+ — adversarial probe on the actual diff)
 
 > **v0.3-strategic** (2026-05-20). Second cycle-time intervention point. Slice-claim challenge runs on stated intent (planning doc + acceptance receipt); pre-push red team runs on actual delivered scope (the diff). Two different jobs.

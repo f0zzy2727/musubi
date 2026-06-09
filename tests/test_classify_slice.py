@@ -58,3 +58,34 @@ def test_text_format_emits_lane_line():
 def test_reasons_present():
     result = classify(["src/App.tsx"], 5)
     assert any("UI" in r for r in result["reasons"])
+
+
+# --- blast_radius: a SEPARATE axis from the lane (forced-debate gating) -------
+
+@pytest.mark.parametrize("files,loc,expected", [
+    (["db/migrations/001.sql"], 5, "high"),        # schema — destructive surface
+    (["src/App.tsx"], 5, "high"),                  # UI
+    ([".github/workflows/ci.yml"], 3, "high"),     # CI
+    (["docs/agents/current-state.md"], 4, "high"), # state file
+    (["src/big.ts"], 350, "high"),                 # >300 LOC
+    (["README.md"], 5, "low"),                     # docs
+    (["src/util.ts"], 12, "low"),                  # small code
+])
+def test_blast_radius(files, loc, expected):
+    assert classify(files, loc)["blast_radius"] == expected, files
+
+
+def test_blast_radius_orthogonal_to_lane():
+    # A multi-file code change is heavy LANE but LOW blast radius — the two axes
+    # must not collapse into one (debate ceremony shouldn't fire on plain code).
+    result = classify(["src/a.ts", "src/b.ts"], 40)
+    assert result["lane"] == "heavy"
+    assert result["blast_radius"] == "low"
+
+
+def test_text_format_emits_blast_radius_line():
+    out = subprocess.run(
+        ["bash", str(_SCRIPT), "--loc", "5", "--files", "db/migrations/001.sql"],
+        capture_output=True, text=True, check=True,
+    )
+    assert "Blast radius: high" in out.stdout
