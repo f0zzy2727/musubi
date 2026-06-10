@@ -12,9 +12,12 @@
 #   bash scripts/collect-debug-bundle.sh                  # all musubi*.toml
 #   bash scripts/collect-debug-bundle.sh -c musubi-app2.toml -c musubi-app3.toml
 #   bash scripts/collect-debug-bundle.sh -d 30 -o /tmp
+#   bash collect-debug-bundle.sh -m ~/Desktop/musubi      # script copied elsewhere
 #
 #   -c  collect only this toml (repeatable). Default: every musubi*.toml
 #       in the checkout root except musubi.toml.example
+#   -m  path to the musubi checkout. Default: auto-detected (next to this
+#       script, current dir, ~/Desktop/musubi, ~/musubi, ~/Dev/musubi*)
 #   -d  how many days of chat transcripts to include (default: 14)
 #   -o  where to write the zip (default: ~/Desktop, falls back to ~)
 #
@@ -48,24 +51,74 @@ set -u
 DAYS=14
 OUTDIR=""
 TOMLS=""
+MUSUBI_DIR_OPT=""
 
-while getopts "c:d:o:h" opt; do
+while getopts "c:d:m:o:h" opt; do
   case "$opt" in
     c) TOMLS="$TOMLS
 $OPTARG" ;;
     d) DAYS="$OPTARG" ;;
+    m) MUSUBI_DIR_OPT="$OPTARG" ;;
     o) OUTDIR="$OPTARG" ;;
     h)
       sed -n '2,45p' "$0"
       exit 0
       ;;
-    *) echo "usage: $0 [-c musubi.toml]... [-d days] [-o outdir]" >&2; exit 2 ;;
+    *) echo "usage: $0 [-c musubi.toml]... [-m musubi-dir] [-d days] [-o outdir]" >&2; exit 2 ;;
   esac
 done
 
 # --- locate musubi checkout ---------------------------------------------------
+# The script may have been copied out of the checkout and run from anywhere
+# (e.g. from $HOME), so script-relative location is only the first guess.
+# A directory counts as the checkout when it has a musubi*.toml (non-example)
+# or orchestrator.py.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MUSUBI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+has_tomls() {
+  for f in "$1"/musubi*.toml; do
+    [ -f "$f" ] || continue
+    case "$f" in *.example) continue ;; esac
+    return 0
+  done
+  return 1
+}
+
+MUSUBI_DIR=""
+if [ -n "$MUSUBI_DIR_OPT" ]; then
+  if [ ! -d "$MUSUBI_DIR_OPT" ]; then
+    echo "ERROR: -m directory not found: $MUSUBI_DIR_OPT" >&2
+    exit 1
+  fi
+  MUSUBI_DIR="$(cd "$MUSUBI_DIR_OPT" && pwd)"
+else
+  CANDIDATES="$SCRIPT_DIR/..
+$PWD
+$HOME/Desktop/musubi
+$HOME/musubi
+$HOME/Dev/musubi"
+  # also any ~/Dev/musubi* checkout (musubi.repo etc.)
+  for d in "$HOME"/Dev/musubi*; do
+    [ -d "$d" ] && CANDIDATES="$CANDIDATES
+$d"
+  done
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    if has_tomls "$d" || [ -f "$d/orchestrator.py" ]; then
+      MUSUBI_DIR="$(cd "$d" && pwd)"
+      break
+    fi
+  done <<EOF_CAND
+$CANDIDATES
+EOF_CAND
+fi
+
+if [ -z "$MUSUBI_DIR" ]; then
+  echo "ERROR: could not find a musubi checkout (looked next to this script," >&2
+  echo "in the current directory, ~/Desktop/musubi, ~/musubi, ~/Dev/musubi*)." >&2
+  echo "Point me at it:  bash $0 -m /path/to/musubi" >&2
+  exit 1
+fi
 
 # Default discovery: every musubi*.toml in the checkout root, minus the
 # shipped template — the same candidate set pick-config.sh offers at launch.
