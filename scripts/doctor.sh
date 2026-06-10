@@ -260,16 +260,34 @@ if [ "$oya_enabled" = "true" ]; then
     ctx_raw="$(toml_value 'agents.oyakata' 'context_docs' "$TOML")"
     if [ -n "$ctx_raw" ] && [ "$ctx_raw" != "[]" ]; then
       ctx_paths="$(printf '%s\n' "$ctx_raw" | grep -oE '"[^"]*"|'\''[^'\'']*'\''' | tr -d '"'\' || true)"
-      missing=""; found_ctx=0
+      missing=""; managed=""; found_ctx=0
       for p in $ctx_paths; do
         found_ctx=1
-        [ -e "$proj_path/$p" ] || missing="$missing $p"
+        if [ ! -e "$proj_path/$p" ]; then
+          missing="$missing $p"
+        elif [ -f "$proj_path/$p" ] && head -n 1 "$proj_path/$p" | grep -q '<!-- musubi-managed:'; then
+          # A musubi-managed template (e.g. docs/agents/IaA.md) is process
+          # machinery bootstrap.sh refreshes — it contains zero product
+          # knowledge. Pointing Oya's north-star at one means she boots
+          # "successfully" while knowing nothing about the app. Field
+          # specimen: four sibling apps all configured
+          # context_docs = ["docs/agents/IaA.md"], each holding the
+          # byte-identical I&A audit template.
+          managed="$managed $p"
+        fi
       done
-      if [ "$found_ctx" -eq 1 ] && [ -z "$missing" ]; then
-        pass "Oya enabled: context_docs all present in project"
-      elif [ -n "$missing" ]; then
+      if [ -n "$managed" ]; then
+        warn "Oya enabled: context_docs points at musubi-managed template(s):$managed
+        impact: that file is process machinery (refreshed by bootstrap.sh) with NO product knowledge —
+                Oya boots 'successfully' but learns nothing about your app.
+        fix: write a real vision doc (cp templates/VISION.md \"$proj_path/docs/\") and point context_docs at it,
+             or remove the musubi-managed marker from the file if you have genuinely customised it."
+      fi
+      if [ -n "$missing" ]; then
         warn "Oya enabled: context_docs listed but missing in project:$missing
         fix: create the file(s) under $proj_path, or correct the paths in [agents.oyakata].context_docs."
+      elif [ "$found_ctx" -eq 1 ] && [ -z "$managed" ]; then
+        pass "Oya enabled: context_docs all present in project"
       fi
     else
       # No explicit context_docs — check the auto-discovered recognised docs.

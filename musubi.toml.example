@@ -71,6 +71,10 @@ session_name = "musubi"                  # tmux session name — change if runni
 #     project.path. If omitted, Oya auto-discovers the recognised files
 #     (PRODUCT-VISION/VISION/PRD/README, docs/adr/*, ROADMAP/BACKLOG) and asks you
 #     on turn one if she finds none. Set this to guarantee she reads YOUR docs.
+#     NEVER point this at a musubi-managed file (first line carries the
+#     '<!-- musubi-managed: -->' marker, e.g. docs/agents/IaA.md) — those are
+#     process templates with no product knowledge, and bootstrap.sh refreshes
+#     them. doctor.sh warns if you do; Oya treats them as a missing north-star.
 # contested_debate = false                    # SPIKE, off by default
 #   ^ Opt into forced-debate mechanism #1 (blind position-commitment). When true,
 #     a `blast_radius: high` slice (state/schema/CI/UI/>300 LOC, per

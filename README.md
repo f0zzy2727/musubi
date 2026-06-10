@@ -563,6 +563,23 @@ On startup she auto-discovers the recognised filenames (read every one that's pr
 context_docs = ["docs/product-brief.md", "docs/tech-design.md", "docs/plan.md"]
 ```
 
+> **Don't point `context_docs` at a musubi-managed file** (anything whose first
+> line carries the `<!-- musubi-managed: -->` marker, e.g. `docs/agents/IaA.md`).
+> Those are process machinery that `bootstrap.sh` refreshes — they contain no
+> product knowledge, so Oya boots "successfully" knowing nothing about your app.
+> This has happened in the field: one operator's apps all listed `IaA.md` as
+> "the live spec", and every copy was the identical blank template. `doctor.sh`
+> now warns on it, and Oya treats a managed file as a missing north-star.
+>
+> **And keep the docs honest once they exist.** A north-star that's loaded but
+> stale is worse than none: the field incident that taught us this happened in
+> a project whose vision and architecture docs were real and read at every
+> boot — but an abandoned product rule survived in the docs, got copied forward
+> by an agent as if current, and the pair faithfully built to a design the
+> operator had dropped months earlier. When you change your mind about how the
+> product behaves, mark the old rule superseded *in the doc* — agents can't
+> hear what you only decided in your head.
+
 **If you're starting from nothing**, copy the starter stubs and fill them in (a short, honest page Oya can hold in view beats a spec nobody reads):
 
 ```bash

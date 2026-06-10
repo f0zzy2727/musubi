@@ -111,6 +111,42 @@ def test_context_docs_present_passes(tmp_path):
                for ln in oya_lines(result.stdout))
 
 
+def test_context_docs_managed_template_warns(tmp_path):
+    # Field specimen 2026-06-10: four sibling apps each pointed context_docs
+    # at docs/agents/IaA.md — a musubi-managed template bootstrap refreshes,
+    # holding zero product knowledge. Existence-only checking passed it.
+    toml = ('[project]\npath = "__PROJ__"\n[agents.oyakata]\n'
+            'enabled = true\ncontext_docs = ["docs/agents/IaA.md"]\n')
+    stdout, proj = run_doctor(tmp_path, toml)
+    (proj / "docs" / "agents").mkdir(parents=True)
+    (proj / "docs" / "agents" / "IaA.md").write_text(
+        "<!-- musubi-managed: Inspect & Adapt spec. -->\n# Inspect & Adapt\n")
+    result = subprocess.run(
+        ["bash", str(tmp_path / "repo" / "scripts" / "doctor.sh")],
+        capture_output=True, text=True,
+    )
+    lines = oya_lines(result.stdout)
+    assert any("WARN" in ln and "musubi-managed template" in ln for ln in lines)
+    assert not any("PASS" in ln and "context_docs all present" in ln
+                   for ln in lines)
+
+
+def test_context_docs_demoted_marker_passes(tmp_path):
+    # Operator customised the file and removed the marker — counts as real.
+    toml = ('[project]\npath = "__PROJ__"\n[agents.oyakata]\n'
+            'enabled = true\ncontext_docs = ["docs/agents/IaA.md"]\n')
+    stdout, proj = run_doctor(tmp_path, toml)
+    (proj / "docs" / "agents").mkdir(parents=True)
+    (proj / "docs" / "agents" / "IaA.md").write_text(
+        "# Our real app spec\nDecline goes to the dashboard.\n")
+    result = subprocess.run(
+        ["bash", str(tmp_path / "repo" / "scripts" / "doctor.sh")],
+        capture_output=True, text=True,
+    )
+    assert any("PASS" in ln and "context_docs all present" in ln
+               for ln in oya_lines(result.stdout))
+
+
 def test_context_docs_missing_warns(tmp_path):
     toml = ('[project]\npath = "__PROJ__"\n[agents.oyakata]\n'
             'enabled = true\ncontext_docs = ["docs/missing.md"]\n')
