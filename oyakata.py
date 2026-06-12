@@ -144,15 +144,17 @@ def relay_operator_input_to_oyakata(message, p_oyakata, cfg):
     This is the input half of the operator console. The operator typed this
     into the console pane (not Oya's pane), so it arrives here as a file event
     and we inject it the same way the orchestrator injects comms relays. Oya
-    treats it exactly like @LEAD speaking in her pane: answer, and mirror the
-    answer to the operator channel per her prompt."""
+    treats it exactly like the operator speaking in her pane: answer, and
+    mirror the answer to the operator channel per her prompt."""
     from orchestrator import send_message  # lazy import to avoid cycle
+    from comms import operator_handle
     if p_oyakata is None:
         return
+    op = operator_handle(cfg)
     notification = (
-        f"@OYA operator message — the operator typed this to you in the "
-        f"console pane:\n\n{message}\n\n"
-        f"Treat it exactly as @LEAD speaking in your pane: answer truthfully "
+        f"@OYA operator message — the operator ({op}) typed this to you in "
+        f"the console pane:\n\n{message}\n\n"
+        f"Treat it exactly as {op} speaking in your pane: answer truthfully "
         f"and concisely, and mirror your answer verbatim to the operator "
         f"channel the same turn (per your prompt's Operator-channel rule) so "
         f"it survives the scroll. If it's a bounded blocking ask back to them, "
@@ -533,6 +535,11 @@ def spawn_oya_if_enabled(cfg, config_path, session):
     env = os.environ.copy()
     env["MUSUBI_SESSION"] = session.name
     env["OYA_QUIET_BANNER"] = "1"
+    # Operator identity for the prompt paste: attach-oya.sh substitutes the
+    # prompt's @LEAD references with this so Oya addresses the operator by
+    # the bed's configured handle from [operator].handle.
+    from comms import operator_handle
+    env["MUSUBI_OPERATOR_HANDLE"] = operator_handle(cfg)
     # Tell attach-oya.sh where this install lives. Its default is
     # ~/Dev/musubi.repo but the README documents ~/Dev/musubi; pinning the
     # actual install dir here makes auto-spawn portable to any clone path.

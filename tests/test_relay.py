@@ -561,3 +561,69 @@ class TestResumeOffset:
             f.write(complete + partial)
         off = resume_offset(path, cfg)
         assert read_new_content(path, off) == "\n" + partial
+
+
+# ---------------------------------------------------------------------------
+# Operator handle carry-through ([operator].handle, field report 2026-06-12)
+# ---------------------------------------------------------------------------
+
+class TestOperatorHandle:
+    """Sessions were defaulting to @LEAD even when the bed names its operator.
+    [operator].handle in musubi.toml must carry through everything the
+    orchestrator and Oya emit about the operator at runtime."""
+
+    def test_default_is_lead(self, cfg):
+        from comms import operator_handle
+        assert operator_handle(cfg) == "@LEAD"
+
+    def test_configured_handle_wins(self, cfg):
+        from comms import operator_handle
+        cfg["operator"] = {"handle": "@MICHI", "name": "Michi"}
+        assert operator_handle(cfg) == "@MICHI"
+
+    def test_missing_at_prefix_is_tolerated(self, cfg):
+        from comms import operator_handle
+        cfg["operator"] = {"handle": "MICHI"}
+        assert operator_handle(cfg) == "@MICHI"
+
+    def test_blank_handle_falls_back(self, cfg):
+        from comms import operator_handle
+        cfg["operator"] = {"handle": "   "}
+        assert operator_handle(cfg) == "@LEAD"
+
+    def test_operator_input_relay_uses_configured_handle(self, cfg, panes):
+        """The console-message relay instruction Oya receives must name the
+        configured operator, not the @LEAD role default."""
+        from oyakata import relay_operator_input_to_oyakata
+        cfg["operator"] = {"handle": "@MICHI"}
+        cfg["comms"]["send_pause_seconds"] = 0.0
+        p_oya, _ = panes
+        relay_operator_input_to_oyakata("status?", p_oya, cfg)
+        sent = " ".join(
+            str(c.args[0]) for c in p_oya.send_keys.call_args_list if c.args
+        )
+        assert "@MICHI" in sent
+        assert "@LEAD" not in sent
+
+    def test_spawn_env_carries_operator_handle(self, cfg):
+        """spawn_oya_if_enabled must export MUSUBI_OPERATOR_HANDLE so
+        attach-oya.sh can substitute the prompt's @LEAD references."""
+        from unittest.mock import patch, MagicMock
+        import oyakata as oyakata_module
+        from oyakata import spawn_oya_if_enabled
+
+        cfg["agents"]["oyakata"] = {"name": "Oya", "handle": "@OYA", "enabled": True}
+        cfg["operator"] = {"handle": "@MICHI"}
+        session = MagicMock()
+        session.active_window.panes = []
+        session.name = "test-session"
+
+        with patch.object(oyakata_module, "subprocess") as mock_subprocess:
+            mock_subprocess.Popen = MagicMock()
+            with patch.object(oyakata_module, "discover_oyakata_pane",
+                              side_effect=[None, MagicMock()]):
+                spawn_oya_if_enabled(cfg, "musubi.toml", session)
+
+        assert mock_subprocess.Popen.called
+        _args, kwargs = mock_subprocess.Popen.call_args
+        assert kwargs.get("env", {}).get("MUSUBI_OPERATOR_HANDLE") == "@MICHI"

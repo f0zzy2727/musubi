@@ -59,6 +59,9 @@ MUSUBI_ROOT="${MUSUBI_ROOT:-$HOME/Dev/musubi.repo}"
 CONFIG_TOML="${1:-$MUSUBI_ROOT/musubi.toml}"
 SESSION="${MUSUBI_SESSION:-musubi}"
 PROMPT_FILE="$MUSUBI_ROOT/docs/operator/oyakata-prompt-v0.1.md"
+# Operator handle for prompt substitution — set by the orchestrator from
+# [operator].handle in musubi.toml; @LEAD when the bed doesn't configure one.
+OPERATOR_HANDLE="${MUSUBI_OPERATOR_HANDLE:-@LEAD}"
 SESSION_WAIT_SECONDS=60
 OYAKATA_TITLE="OYAKATA · 親方 · master craftsman"
 OPUS_TITLE="OPUS · Anthropic"
@@ -117,6 +120,24 @@ command -v tmux   >/dev/null || die "tmux not installed"
 command -v claude >/dev/null || die "claude CLI not on PATH (npm i -g @anthropic-ai/claude-code, or check your PATH)"
 [ -f "$PROMPT_FILE" ] || die "prompt file not found: $PROMPT_FILE"
 [ -f "$CONFIG_TOML" ] || die "musubi.toml not found at $CONFIG_TOML (pass an explicit path as the first arg)"
+
+# Standalone-launch fallback: when this script runs without the orchestrator
+# (no MUSUBI_OPERATOR_HANDLE in env), read [operator].handle from the toml
+# directly so the prompt substitution still gets the bed's operator name.
+if [ "$OPERATOR_HANDLE" = "@LEAD" ]; then
+  toml_handle=$(awk -F'"' '
+    /^\[operator\]/ { in_op=1; next }
+    /^\[/           { in_op=0 }
+    in_op && /^[[:space:]]*handle[[:space:]]*=/ { print $2; exit }
+  ' "$CONFIG_TOML")
+  if [ -n "$toml_handle" ]; then
+    case "$toml_handle" in
+      @*) OPERATOR_HANDLE="$toml_handle" ;;
+      *)  OPERATOR_HANDLE="@$toml_handle" ;;
+    esac
+  fi
+fi
+log "operator handle: $OPERATOR_HANDLE"
 
 # --- Clipboard tool detection (cross-platform) --------------------
 # Tries platform-appropriate tools in preference order and exports a single
@@ -491,7 +512,13 @@ fi
 # $MUSUBI_ROOT at paste/copy time. The | delimiter for sed avoids escaping
 # slashes in absolute paths.
 substitute_paths() {
-  sed -e "s|<PROJECT_PATH>|$TARGET|g" -e "s|<MUSUBI_ROOT>|$MUSUBI_ROOT|g"
+  # Also rewrite the prompt's @LEAD role references to the bed's configured
+  # operator handle ([operator].handle, passed by the orchestrator as
+  # MUSUBI_OPERATOR_HANDLE) so Oya addresses the operator by name instead of
+  # defaulting to @LEAD. No-op when unset or already @LEAD.
+  sed -e "s|<PROJECT_PATH>|$TARGET|g" \
+      -e "s|<MUSUBI_ROOT>|$MUSUBI_ROOT|g" \
+      -e "s|@LEAD|$OPERATOR_HANDLE|g"
 }
 
 prompt_lines=$(sed -n '/^## Prompt/,$p' "$PROMPT_FILE" | wc -l | tr -d ' ')

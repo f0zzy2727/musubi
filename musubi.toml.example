@@ -5,6 +5,13 @@
 [project]
 path = "/path/to/your/project"           # absolute path to the codebase the agents will work on
 
+# Optional — who the human lead is. Oya and the orchestrator address the
+# operator by this handle at runtime (prompt, console relays). Without this
+# block, sessions fall back to the runbook's generic role handle @LEAD.
+# [operator]
+# handle = "@YOU"                        # your comms handle (leading @ optional)
+# name = "Your Name"                     # display name — informational
+
 [agents]
 
 [agents.opus]

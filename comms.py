@@ -164,6 +164,23 @@ def detect_writer_from_buffer(buffer, cfg):
     return latest_key.upper() if latest_key else None
 
 
+def operator_handle(cfg):
+    """The operator's comms handle from `[operator].handle`, default `@LEAD`.
+
+    The runbook documents the human lead under the role handle `@LEAD`, but
+    real beds give the operator a personal handle (e.g. `@MICHI`). Everything
+    the orchestrator or Oya emits ABOUT the operator at runtime must use this
+    value — a session that keeps saying `@LEAD` when the bed has a named
+    operator splits the operator's identity across two handles (field report
+    2026-06-12). Tolerant of a missing leading `@`."""
+    op = cfg.get("operator", {}) if isinstance(cfg, dict) else {}
+    handle = op.get("handle") if isinstance(op, dict) else None
+    if not handle or not str(handle).strip():
+        return "@LEAD"
+    handle = str(handle).strip()
+    return handle if handle.startswith("@") else "@" + handle
+
+
 def _all_configured_handles(cfg):
     """All comms-participating handles from cfg, including optional Oya.
     Returns a list like ['@OPUS', '@CODA', '@OYA']. Order is opus, coda,
