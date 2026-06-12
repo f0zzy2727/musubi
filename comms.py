@@ -182,6 +182,41 @@ def _all_configured_handles(cfg):
 _BLOCK_SEPARATOR = "---------------------------------------------------"
 
 
+def resume_offset(path, cfg):
+    """Byte offset a (re)starting watcher should resume from: just PAST the
+    end of the last over-signal in the file, so a message an agent is
+    mid-composing at boot is read whole once its over-signal lands.
+
+    The old behaviour (resume at raw EOF) orphaned in-flight messages on a
+    watcher restart (`--attach` after a code edit): the head written before
+    boot was never read, and the tail arrived with no [@HANDLE] header — three
+    retry ticks later it was quarantined to an `_unparseable_` sidecar and the
+    message silently never relayed. Field bug, okami bed 2026-06-11: four
+    orphaned tails in one morning of attach-relaunch iteration.
+
+    Falls back to EOF when the file has no over-signal at all (fresh or
+    preamble-only file) — there is no in-flight message to protect before the
+    first over-signal ever written, and re-reading a preamble that never
+    parses would churn the unparseable path. Missing file is 0.
+
+    Note this protects the MID-COMPOSE message only. A message COMPLETED while
+    the watcher was down still ends before the last over-signal and is not
+    re-relayed (re-draining the whole file would re-deliver the entire cycle —
+    the per-process recently-relayed memory is empty at boot)."""
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except FileNotFoundError:
+        return 0
+    over_re = over_pattern(cfg["comms"]["over_signal"])
+    last_end = None
+    for m in over_re.finditer(content):
+        last_end = m.end()
+    if last_end is None:
+        return get_file_size(path)
+    return len(content[:last_end].encode("utf-8"))
+
+
 def extract_messages(new_content, cfg):
     """All complete message blocks in `new_content`, in WRITE ORDER, plus how
     far into the content the last complete block reaches.

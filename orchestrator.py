@@ -27,6 +27,7 @@ from comms import (
     resolve_archive_dir,
     find_latest_archive,
     read_new_content,
+    resume_offset,
     over_pattern,
     detect_writer_from_buffer,
     extract_last_message,
@@ -1112,7 +1113,11 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     print(f"\nWatching {comms_file} for {over} signals...")
     print("Press Ctrl+C to stop.\n")
 
-    last_offset = get_file_size(comms_file)
+    # Resume just past the last over-signal, NOT raw EOF: a raw-EOF start on a
+    # live file (--attach relaunch) lands mid-message whenever an agent is
+    # mid-append at that instant — the head is never read and the tail gets
+    # quarantined as unparseable. Field bug, okami bed 2026-06-11.
+    last_offset = resume_offset(comms_file, cfg)
     # Memory of recently-relayed blocks. Guards against re-delivery after a file
     # shrink/rotation re-read (last_offset resets to 0 and the whole active
     # comms file is re-drained) and after a mid-drain failure retry — the window
@@ -1597,7 +1602,15 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                 else:
                     unparseable_retries += 1
                     if unparseable_retries >= UNPARSEABLE_RETRY_LIMIT:
-                        skipped_bytes = current_size - last_offset
+                        # Skip ONLY the over-closed span extract_messages
+                        # accounted for (consumed_chars), never to current
+                        # EOF: the file may have grown during the retry ticks,
+                        # and jumping to EOF swallows the head of whatever an
+                        # agent is composing right now — its orphaned tail then
+                        # becomes the NEXT unparseable region (quarantine
+                        # cascade, okami bed 2026-06-11).
+                        skipped_bytes = len(
+                            new_content[:consumed_chars].encode("utf-8"))
                         # Save the unparseable region to a sidecar so the
                         # operator can recover if a real message was in it.
                         # Sidecar path: alongside the comms file, named
@@ -1626,7 +1639,7 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                             "unparseable-drop",
                             f"skipped {skipped_bytes} bytes with no recognised "
                             f"handle — {sidecar_note}")
-                        last_offset = current_size
+                        last_offset += skipped_bytes
                         unparseable_at_size = None
                         unparseable_retries = 0
                 continue

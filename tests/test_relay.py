@@ -479,3 +479,85 @@ class TestOyaSpawnEnvironmentPropagation:
         )
         assert env.get("OYA_QUIET_BANNER") == "1"
         assert env.get("MUSUBI_SESSION") == "test-session"
+
+
+# ---------------------------------------------------------------------------
+# Watcher resume offset (orphan-tail field bug, okami bed 2026-06-11)
+# ---------------------------------------------------------------------------
+
+class TestResumeOffset:
+    """A watcher that (re)starts on a live comms file must resume just past
+    the last over-signal, not at raw EOF. Raw EOF lands mid-message whenever
+    an agent is mid-append at boot: the head is never read and the tail is
+    later quarantined as an `_unparseable_` sidecar — four orphaned tails on
+    the okami bed in one morning of --attach relaunches (2026-06-11)."""
+
+    def test_missing_file_is_zero(self, cfg):
+        from comms import resume_offset
+        assert resume_offset(cfg["comms"]["file"] + ".nope", cfg) == 0
+
+    def test_no_over_signal_falls_back_to_eof(self, cfg):
+        """Preamble-only file (no over yet): EOF, same as old behaviour —
+        nothing in-flight to protect, and re-reading an unparseable preamble
+        would churn the quarantine path."""
+        from comms import resume_offset
+        path = cfg["comms"]["file"]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# comms preamble, no messages yet\n")
+        assert resume_offset(path, cfg) == os.path.getsize(path)
+
+    def test_complete_file_resumes_at_eof(self, cfg):
+        """All messages closed: last over end == EOF region (trailing
+        newline after it may remain unread — it must be <= EOF and past
+        the final over token)."""
+        from comms import resume_offset
+        path = cfg["comms"]["file"]
+        content = _message("@OPUS") + _message("@CODA")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        off = resume_offset(path, cfg)
+        consumed = content.encode("utf-8")[:off].decode("utf-8")
+        assert consumed.rstrip().endswith("<OVER>")
+        assert content[len(consumed):].strip() == ""
+
+    def test_mid_compose_tail_is_preserved(self, cfg):
+        """The regression case: agent mid-append at boot. Resume offset must
+        sit at the end of the LAST COMPLETE message so the partial head is
+        re-read together with its tail when the over-signal lands."""
+        from comms import resume_offset, read_new_content, extract_messages
+        path = cfg["comms"]["file"]
+        complete = _message("@OPUS")
+        partial_head = (
+            "---------------------------------------------------\n"
+            "[@CODA] [2026-06-11] [09:54 UTC]\n"
+            "To: @OPUS\n"
+            "Type: Update\n"
+            "\n"
+            "Action: SPEC planni"  # mid-word, exactly like the field artefact
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(complete + partial_head)
+        off = resume_offset(path, cfg)
+        # Old behaviour: off == EOF → partial head skipped, tail orphaned.
+        assert off < os.path.getsize(path), "must not resume at raw EOF"
+        # The whole partial head is still ahead of the offset (plus the
+        # newline that trailed the previous over-signal).
+        assert read_new_content(path, off) == "\n" + partial_head
+        # When the tail + over-signal arrive, the message parses whole.
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("ng note lands in SPEC.md\n<OVER>\n")
+        blocks, _ = extract_messages(read_new_content(path, off), cfg)
+        assert len(blocks) == 1
+        assert "SPEC planning note lands in SPEC.md" in blocks[0]
+
+    def test_multibyte_content_offset_is_byte_accurate(self, cfg):
+        """Em-dashes etc. before the last over-signal must not skew the byte
+        offset (the watcher seeks in bytes)."""
+        from comms import resume_offset, read_new_content
+        path = cfg["comms"]["file"]
+        complete = _message("@OPUS", body="Result: pass — approved — clean\n")
+        partial = "[@CODA] [2026-06-11] [10:07 UTC]\nEverything from"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(complete + partial)
+        off = resume_offset(path, cfg)
+        assert read_new_content(path, off) == "\n" + partial
