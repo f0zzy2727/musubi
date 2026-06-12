@@ -2,7 +2,10 @@
 
 # User config — contains project paths specific to your machine
 # Use musubi.toml.example as the shareable template
+# Per-bed configs (musubi.<bed>.toml) are personal too — config picker
+# selects among them at launch.
 musubi.toml
+musubi.*.toml
 
 # Virtual environment
 .venv/

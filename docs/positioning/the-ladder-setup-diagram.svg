@@ -1,0 +1,79 @@
+<svg viewBox="0 0 1400 980" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#3B4451"/>
+    </marker>
+    <marker id="arrowTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2F6F6A"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="980" fill="#FFFFFF"/>
+
+  <!-- Operator -->
+  <rect x="540" y="36" width="320" height="84" rx="6" fill="#FFFFFF" stroke="#3B4451" stroke-width="2"/>
+  <text x="700" y="72" text-anchor="middle" font-size="24" font-weight="700" fill="#1F2933" letter-spacing="1">ME, THE OPERATOR</text>
+  <text x="700" y="100" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">final word on everything</text>
+
+  <line x1="700" y1="120" x2="700" y2="162" stroke="#3B4451" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Supervisor -->
+  <rect x="510" y="168" width="380" height="96" rx="6" fill="#FFFFFF" stroke="#2F6F6A" stroke-width="2.5"/>
+  <text x="700" y="206" text-anchor="middle" font-size="24" font-weight="700" fill="#2F6F6A" letter-spacing="1">OYA, THE SUPERVISOR</text>
+  <text x="700" y="232" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">builds nothing · holds the brief · probes independently</text>
+
+  <!-- Supervisor watch lines to agents -->
+  <line x1="580" y1="264" x2="420" y2="334" stroke="#2F6F6A" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arrowTeal)"/>
+  <line x1="820" y1="264" x2="980" y2="334" stroke="#2F6F6A" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arrowTeal)"/>
+  <text x="700" y="306" text-anchor="middle" font-size="15" font-style="italic" fill="#2F6F6A">watches both, reads neither as gospel</text>
+
+  <!-- Agents -->
+  <rect x="250" y="340" width="320" height="96" rx="6" fill="#FFFFFF" stroke="#3B4451" stroke-width="2"/>
+  <text x="410" y="380" text-anchor="middle" font-size="24" font-weight="700" fill="#1F2933" letter-spacing="1">AGENT A</text>
+  <text x="410" y="408" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">vendor one</text>
+
+  <rect x="830" y="340" width="320" height="96" rx="6" fill="#FFFFFF" stroke="#3B4451" stroke-width="2"/>
+  <text x="990" y="380" text-anchor="middle" font-size="24" font-weight="700" fill="#1F2933" letter-spacing="1">AGENT B</text>
+  <text x="990" y="408" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">vendor two</text>
+
+  <!-- A <-> B -->
+  <line x1="578" y1="388" x2="822" y2="388" stroke="#3B4451" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="700" y="368" text-anchor="middle" font-size="15" fill="#3B4451">deliberate equals</text>
+  <text x="700" y="460" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">different vendors, different instincts</text>
+  <text x="700" y="482" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">plan together · both build · each reviews the other</text>
+
+  <!-- Sub-agents -->
+  <line x1="350" y1="436" x2="350" y2="514" stroke="#9AA1AB" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="470" y1="436" x2="470" y2="514" stroke="#9AA1AB" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <rect x="290" y="520" width="120" height="56" rx="6" fill="#FFFFFF" stroke="#9AA1AB" stroke-width="1.6" stroke-dasharray="4 4"/>
+  <rect x="430" y="520" width="120" height="56" rx="6" fill="#FFFFFF" stroke="#9AA1AB" stroke-width="1.6" stroke-dasharray="4 4"/>
+  <text x="350" y="554" text-anchor="middle" font-size="15" fill="#5B6470">sub-agent</text>
+  <text x="490" y="554" text-anchor="middle" font-size="15" fill="#5B6470">sub-agent</text>
+
+  <line x1="930" y1="436" x2="930" y2="514" stroke="#9AA1AB" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="1050" y1="436" x2="1050" y2="514" stroke="#9AA1AB" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <rect x="870" y="520" width="120" height="56" rx="6" fill="#FFFFFF" stroke="#9AA1AB" stroke-width="1.6" stroke-dasharray="4 4"/>
+  <rect x="1010" y="520" width="120" height="56" rx="6" fill="#FFFFFF" stroke="#9AA1AB" stroke-width="1.6" stroke-dasharray="4 4"/>
+  <text x="930" y="554" text-anchor="middle" font-size="15" fill="#5B6470">sub-agent</text>
+  <text x="1070" y="554" text-anchor="middle" font-size="15" fill="#5B6470">sub-agent</text>
+
+  <text x="420" y="600" text-anchor="middle" font-size="14" font-style="italic" fill="#9AA1AB">spawned as needed; each agent answers for its own</text>
+
+  <!-- Arrows into comms band -->
+  <line x1="410" y1="612" x2="410" y2="654" stroke="#3B4451" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="990" y1="585" x2="990" y2="654" stroke="#3B4451" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Comms band -->
+  <rect x="170" y="660" width="1060" height="96" rx="6" fill="#FFFFFF" stroke="#3B4451" stroke-width="2"/>
+  <text x="700" y="700" text-anchor="middle" font-size="22" font-weight="700" fill="#1F2933" letter-spacing="1">SHARED COMMS FILE</text>
+  <text x="700" y="730" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">every claim with evidence · every review verdict · all on record</text>
+
+  <line x1="700" y1="756" x2="700" y2="798" stroke="#3B4451" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Deterministic layer -->
+  <rect x="170" y="804" width="1060" height="104" rx="6" fill="#F3F4F6" stroke="#3B4451" stroke-width="2"/>
+  <text x="700" y="848" text-anchor="middle" font-size="22" font-weight="700" fill="#1F2933" letter-spacing="1">THE DETERMINISTIC LAYER</text>
+  <text x="700" y="880" text-anchor="middle" font-size="16" font-style="italic" fill="#5B6470">scripts · gates · type checks · the metrics file that keeps score</text>
+
+  <text x="1230" y="944" text-anchor="end" font-size="15" font-style="italic" fill="#9AA1AB">keeps score, and cannot be charmed</text>
+</svg>
