@@ -1,6 +1,6 @@
 # Benchmark results rerun — Codex check (2026-06-09)
 
-This is a direct rerun of `docs/positioning/ANALYSIS-METHOD.md` by Codex. It
+This is a direct rerun of `docs/positioning/benchmarks/ANALYSIS-METHOD.md` by Codex. It
 does not replace `benchmark-results-2026-06.md`; it records a second pass so the
 non-deterministic Track 2 rating can be compared against Claude's earlier pass.
 
@@ -10,24 +10,24 @@ Track 1 used the full `docs/agents` comms trees:
 
 | Bed | Path |
 |---|---|
-| cc-aic / Sli | `~/Dev/aic/cc-aic/docs/agents` |
-| 1-in-a-billion-paradise | `~/Dev/1-in-a-billion-paradise/docs/agents` |
-| portfolio-experiment | `~/Dev/portfolio-experiment/docs/agents` |
+| the SaaS bed | `<saas-bed>/docs/agents` |
+| the mobile/marketplace bed | `<mobile-bed>/docs/agents` |
+| the equity-research bed | `<equity-bed>/docs/agents` |
 
 Track 2 used the current active file plus newest substantial archive per bed:
 
 | Bed | Files |
 |---|---|
-| cc-aic | `comms/active.txt`; `archive/agent_comms_2026-06-09_hardening-sprint.txt` |
-| 1-in-a-billion-paradise | `comms/active.txt`; `archive/comms-active-archive-20260606-113538.md` |
-| portfolio-experiment | `comms/active.txt`; `archive/agent_comms_2026-06-09_125311.txt` |
+| the SaaS bed | `comms/active.txt`; `archive/agent_comms_2026-06-09_hardening-sprint.txt` |
+| the mobile/marketplace bed | `comms/active.txt`; `archive/comms-active-archive-20260606-113538.md` |
+| the equity-research bed | `comms/active.txt`; `archive/agent_comms_2026-06-09_125311.txt` |
 
 ## Phase A — Corpus Spine
 
 ```text
-cc-aic lines=157524 Type=4710 OVER=5120 @OYA=1945
-1-in-a-billion lines=79886 Type=1942 OVER=1981 @OYA=586
-portfolio lines=11551 Type=336 OVER=338 @OYA=798
+SaaS lines=157524 Type=4710 OVER=5120 @OYA=1945
+mobile/marketplace lines=79886 Type=1942 OVER=1981 @OYA=586
+equity lines=11551 Type=336 OVER=338 @OYA=798
 ```
 
 The turn-signalling spine still holds: `<OVER>` is close to or above `Type:` in
@@ -39,15 +39,15 @@ Command:
 
 ```sh
 python3 scripts/comms-metrics.py \
-  ~/Dev/aic/cc-aic/docs/agents \
-  ~/Dev/1-in-a-billion-paradise/docs/agents \
-  ~/Dev/portfolio-experiment/docs/agents \
+  <saas-bed>/docs/agents \
+  <mobile-bed>/docs/agents \
+  <equity-bed>/docs/agents \
   --json /tmp/comms-metrics.json
 ```
 
 Key reproduced numbers:
 
-| Metric | cc-aic | 1iab | portfolio |
+| Metric | SaaS | mobile/marketplace | equity |
 |---|---:|---:|---:|
 | messages | 5065 | 1691 | 336 |
 | `<OVER>` per message | 1.011 | 1.171 | 1.006 |
@@ -72,21 +72,21 @@ A fresh sub-agent was spawned with the NOTECHS / MARBLE / convergence rubric fro
 
 | Bed | Cooperation | Leadership | Situation awareness | Decision-making | Mean |
 |---|---:|---:|---:|---:|---:|
-| cc-aic | 8 | 8 | 7 | 8 | 7.75 |
-| 1-in-a-billion-paradise | 8 | 9 | 8 | 8 | 8.25 |
-| portfolio-experiment | 6 | 7 | 7 | 6 | 6.50 |
+| SaaS | 8 | 8 | 7 | 8 | 7.75 |
+| mobile/marketplace | 8 | 9 | 8 | 8 | 8.25 |
+| equity | 6 | 7 | 7 | 6 | 6.50 |
 | overall | 7.3 | 8.0 | 7.3 | 7.3 | 7.48 |
 
-The rater's strongest cc-aic marker was Oya stopping a stale warm-start:
+The rater's strongest SaaS-bed marker was Oya stopping a stale warm-start:
 `@OPUS -- STOP before you act on that warm-start. Your 14:50 snapshot is stale`.
 The main weakness was the later S3 escape: both peer review and pre-push
 validation approved it before CI caught it.
 
-The strongest 1iab marker was an adversarial end-artifact review for missing
-cached hook-audio regeneration rather than accepting dead signed URLs. The main
-weakness was unresolved provider/sandbox proof, not lack of review structure.
+The strongest mobile/marketplace bed marker was an adversarial end-artifact review
+for missing cached hook-audio regeneration rather than accepting dead signed URLs.
+The main weakness was unresolved provider/sandbox proof, not lack of review structure.
 
-The portfolio score is lower than the previous benchmark because the newest
+The equity-research bed score is lower than the previous benchmark because the newest
 supplied files contain closure summaries and repeated receipts, not much of the
 underlying analyst disagreement trail.
 
@@ -94,24 +94,24 @@ underlying analyst disagreement trail.
 
 | Bed | Score | Read |
 |---|---:|---|
-| cc-aic | 8 | Strong concrete before/after evidence, dragged by stale SHA evidence. |
-| 1-in-a-billion-paradise | 8 | Strong falsification messages, with some contradictory done-call accounting. |
-| portfolio-experiment | 5 | Orderly closure, but repeated bootstrap receipts and little debate substance. |
+| SaaS | 8 | Strong concrete before/after evidence, dragged by stale SHA evidence. |
+| mobile/marketplace | 8 | Strong falsification messages, with some contradictory done-call accounting. |
+| equity | 5 | Orderly closure, but repeated bootstrap receipts and little debate substance. |
 
 ### Convergence quality
 
 | Bed | Disagreements / reviews with findings | Median exchanges | Converged <=1 exchange | Multi-round | Rubber-stamp / procedural approvals |
 |---|---:|---:|---:|---:|---:|
-| cc-aic | 7 | 1 | 71% | 2 | 4 |
-| 1-in-a-billion-paradise | 7 | 1 | 71% | 2 | 1 |
-| portfolio-experiment | 0 found in supplied files | N/A | N/A | 0 | 2 |
+| SaaS | 7 | 1 | 71% | 2 | 4 |
+| mobile/marketplace | 7 | 1 | 71% | 2 | 1 |
+| equity | 0 found in supplied files | N/A | N/A | 0 | 2 |
 | overall | 14 | 1 | 71% | 4 | 7 |
 
-Best negotiation identified by the rater: the cc-aic S3 lockfile correction,
+Best negotiation identified by the rater: the SaaS bed S3 lockfile correction,
 where Oya challenged a `0/0/0` audit story against a real lockfile diff, Opus
 independently confirmed the problem, and Coda amended the audit record.
 
-Most premature convergence identified by the rater: cc-aic S3 original approval,
+Most premature convergence identified by the rater: the SaaS bed S3 original approval,
 where Opus approved at 95% confidence and the system later recorded that both the
 review and pre-push validation missed a defect CI caught.
 
@@ -121,14 +121,14 @@ generally corrected quickly rather than holding an opposing position to impasse.
 ## Reconciliation With Claude's Benchmark
 
 The deterministic Track 1 result is stable. The Track 2 result moved because the
-rater sampled the newest available portfolio files and applied a stricter standard
-to convergence.
+rater sampled the newest available equity-research-bed files and applied a stricter
+standard to convergence.
 
 The earlier benchmark said convergence was partially refuted as a weakness: 44%
 of contested items converged in one exchange, 56% were multi-round, and zero
 rubber-stamps were found. This rerun is less charitable: 71% of contested items
-in the supplied cc-aic and 1iab cycles converged in one exchange, and portfolio
-was not deeply rateable from the newest supplied files.
+in the supplied SaaS-bed and mobile/marketplace-bed cycles converged in one exchange,
+and the equity-research bed was not deeply rateable from the newest supplied files.
 
 The combined read is:
 

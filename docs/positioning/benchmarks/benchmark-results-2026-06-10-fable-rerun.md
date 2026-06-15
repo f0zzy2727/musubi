@@ -1,6 +1,6 @@
 # Benchmark results rerun — Fable check (2026-06-10)
 
-Third pass of `docs/positioning/ANALYSIS-METHOD.md`, this time with Claude
+Third pass of `docs/positioning/benchmarks/ANALYSIS-METHOD.md`, this time with Claude
 Fable 5 as the analysis driver and an independent Fable-powered Track-2 rater.
 It does not replace `benchmark-results-2026-06.md`; with the Codex rerun
 (`benchmark-results-2026-06-09-codex-rerun.md`) it gives a **three-rater**
@@ -20,9 +20,9 @@ disagreement is sample variance or rater variance"):
 
 | Bed | Files |
 |---|---|
-| cc-aic | `comms/active.txt`; `archive/agent_comms_2026-06-09_hardening-sprint.txt` |
-| 1-in-a-billion-paradise | `comms/active.txt` (rotation stub); `archive/comms-active-archive-20260606-113538.md` |
-| portfolio-experiment | `comms/active.txt`; `archive/agent_comms_2026-06-09_125311.txt` |
+| the SaaS bed | `comms/active.txt`; `archive/agent_comms_2026-06-09_hardening-sprint.txt` |
+| the mobile/marketplace bed | `comms/active.txt` (rotation stub); `archive/comms-active-archive-20260606-113538.md` |
+| the equity-research bed | `comms/active.txt`; `archive/agent_comms_2026-06-09_125311.txt` |
 
 ## Phase A — corpus spine
 
@@ -32,9 +32,9 @@ actually present in all three projects. If these counts look wrong, the rest of
 the analysis is reading a broken corpus.*
 
 ```text
-cc-aic lines=157524 Type=4710 OVER=5120 @OYA=1945
-1-in-a-billion lines=79886 Type=1942 OVER=1981 @OYA=586
-portfolio lines=11551 Type=336 OVER=338 @OYA=798
+SaaS lines=157524 Type=4710 OVER=5120 @OYA=1945
+mobile/marketplace lines=79886 Type=1942 OVER=1981 @OYA=586
+equity lines=11551 Type=336 OVER=338 @OYA=798
 ```
 
 Identical to both 2026-06-09 runs. Spine holds.
@@ -45,16 +45,16 @@ Command:
 
 ```sh
 python3 scripts/comms-metrics.py \
-  ~/Dev/aic/cc-aic/docs/agents \
-  ~/Dev/1-in-a-billion-paradise/docs/agents \
-  ~/Dev/portfolio-experiment/docs/agents \
+  <saas-bed>/docs/agents \
+  <mobile-bed>/docs/agents \
+  <equity-bed>/docs/agents \
   --json /tmp/comms-metrics-fable-20260610.json
 ```
 
 **Reproduced exactly — third consecutive identical pass** (Claude 06-09,
 Codex 06-09, Fable 06-10):
 
-| Metric | cc-aic | 1iab | portfolio |
+| Metric | SaaS | mobile/marketplace | equity |
 |---|---:|---:|---:|
 | messages | 5065 | 1691 | 336 |
 | `<OVER>` per message | 1.011 | 1.171 | 1.006 |
@@ -123,19 +123,19 @@ contested-debate spike runs on a bed (as designed — `contested_slices` ≈ 0/1
 
 | Bed | Cooperation | Leadership | Situation awareness | Decision-making | Mean |
 |---|---:|---:|---:|---:|---:|
-| cc-aic | 9 | 9 | 8 | 9 | 8.75 |
-| 1-in-a-billion-paradise | 8 | 9 | 7 | 8 | 8.00 |
-| portfolio-experiment | 6 | 7 | 7 | 6 | 6.50 |
+| SaaS | 9 | 9 | 8 | 9 | 8.75 |
+| mobile/marketplace | 8 | 9 | 7 | 8 | 8.00 |
+| equity | 6 | 7 | 7 | 6 | 6.50 |
 | overall | 7.7 | 8.3 | 7.3 | 7.7 | **7.75** |
 
-Strongest cc-aic markers: honest dual ownership of the S3 escape (*"BOTH my S3
+Strongest SaaS-bed markers: honest dual ownership of the S3 escape (*"BOTH my S3
 review AND Coda's pre-push validation approved it; CI type-check caught it.
 Owning my half honestly"*) and Oya's stale-warm-start falsification
 (*"`git ls-remote` hits the live remote — it cannot return `38418855` now"*).
-SA docked 2 points in cc-aic because the stale-evidence replay was caught by
+SA docked 2 points in the SaaS bed because the stale-evidence replay was caught by
 the supervisor, not self-caught.
 
-Portfolio 6.5 matches Codex's read for the same reason: the newest window is
+The equity-research bed's 6.5 matches Codex's read for the same reason: the newest window is
 cycle-close + warm-start housekeeping; the analytic disagreement trail is
 asserted (*"pair CONVERGED independently (solo-shadows match)"*) but not shown
 in the supplied files.
@@ -144,33 +144,33 @@ in the supplied files.
 
 | Bed | Score | Read |
 |---|---:|---|
-| cc-aic | 7 | Clarity/relevance near-ceiling; five consecutive zero-information Coda "observed/holding" echoes are the defect |
-| 1-in-a-billion-paradise | 8 | Long but information-dense; one near-verbatim claim-receipt echo |
-| portfolio-experiment | 5 | Quadruple bootstrap receipt (4 msgs, 1 minute, 3 with zero new info) in a 143-line file |
+| SaaS | 7 | Clarity/relevance near-ceiling; five consecutive zero-information Coda "observed/holding" echoes are the defect |
+| mobile/marketplace | 8 | Long but information-dense; one near-verbatim claim-receipt echo |
+| equity | 5 | Quadruple bootstrap receipt (4 msgs, 1 minute, 3 with zero new info) in a 143-line file |
 
-Identical bed ordering to both prior raters (cc-aic/1iab high, portfolio 5),
-and the portfolio defect is the same specimen class all three raters found
+Identical bed ordering to both prior raters (SaaS/mobile-marketplace high, equity 5),
+and the equity-research bed defect is the same specimen class all three raters found
 (repeat-posted receipts).
 
 ### Convergence quality (Instrument C)
 
 | Measure | Fable (06-10) |
 |---|---:|
-| genuine disagreements / reviews-with-findings | **11** (cc-aic 5, 1iab 6, portfolio 0) |
+| genuine disagreements / reviews-with-findings | **11** (SaaS 5, mobile/marketplace 6, equity 0) |
 | median exchanges to converge | **1** |
 | converged ≤1 exchange (premature-consensus proxy) | **82%** (9/11) |
 | genuine multi-round | **2** |
 | rubber-stamps | **0** |
 
-Best negotiation: the cc-aic S3 **mechanism sub-dispute** — Coda corrected both
+Best negotiation: the SaaS bed S3 **mechanism sub-dispute** — Coda corrected both
 supervisor and reviewer with command-sequence evidence (*"my live command
 sequence evidence shows the broad package-lock diff was already produced by the
 real `npm audit fix --package-lock-only`"*) and won the point; Opus amended
 (*"Mechanism corrected"*). An implementer holding and **winning** a
 counter-position against two seniors.
 
-Most premature convergence: the 1iab **Google Geocoding/TimeZone false
-positive** — both peers converged in one round on a shared unverified premise
+Most premature convergence: the mobile/marketplace bed **Google Geocoding/TimeZone
+false positive** — both peers converged in one round on a shared unverified premise
 (REQUEST_DENIED from an expired *local* key, never probed against prod); Oya
 refuted it post-convergence (*"Geocoding + Time Zone ALREADY WORK in prod…
 The diagnosis was made off the expired local key, never prod"*).
@@ -185,19 +185,19 @@ Two findings unique to this pass:
 2. **The real premature-consensus failure class is shared-unverified-premise,
    not deference.** The Google false positive is a correlated miss: two
    different vendors' models, same wrong premise, single-round convergence.
-   Heterogeneity did not save it; the supervisor's independent probe did.
-   This is precisely the failure mode the hetero-vs-homo experiment
-   (`heterogeneous-vs-homogeneous.md`) is designed to price.
+   Model-mixing did not save it; the supervisor's independent probe did.
+   This is precisely the failure mode the mixed-vs-same-models experiment
+   (`mixed-vs-same-models.md`) is designed to price.
 
 ## Three-rater reconciliation
 
 Same Track 1, three Track-2 raters. Claude's pass used a slightly older
-portfolio archive; Codex and Fable used identical samples.
+equity-research-bed archive; Codex and Fable used identical samples.
 
 | Measure | Claude (06-09) | Codex (06-09) | Fable (06-10, same sample as Codex) |
 |---|---:|---:|---:|
 | NOTECHS overall | 7.9 | 7.48 | 7.75 |
-| MARBLE (cc-aic / 1iab / portfolio) | 7 / 8 / 5 | 8 / 8 / 5 | 7 / 8 / 5 |
+| MARBLE (SaaS / mobile-marketplace / equity) | 7 / 8 / 5 | 8 / 8 / 5 | 7 / 8 / 5 |
 | disagreements found | 9 | 14 | 11 |
 | median exchanges | 2 | 1 | 1 |
 | ≤1 exchange | 44% | 71% | 82% |
@@ -220,8 +220,8 @@ portfolio archive; Codex and Fable used identical samples.
    raters, independently: convergence is fast (median 1–2 exchanges); genuine
    multi-round negotiation exists but is the minority; no disagreement is ever
    held to impasse — counter-positions get corrected by evidence, not defended
-   to deadlock; the newest portfolio window is not deeply rateable; cc-aic
-   has a measured hygiene defect; per-message rigor is high. Publish the
+   to deadlock; the newest equity-research-bed window is not deeply rateable; the
+   SaaS bed has a measured hygiene defect; per-message rigor is high. Publish the
    direction, not the digits.
 3. **Track 1 is the bedrock.** Three passes, three drivers (Claude, Codex,
    Fable), bit-identical numbers. The deterministic story — turn discipline
@@ -236,13 +236,13 @@ portfolio archive; Codex and Fable used identical samples.
 > implementer can hold and win a counter-position against two seniors). It is
 > not yet proven as "robust adversarial deliberation": challenge flows one way
 > (Coda rarely probes Opus), and the worst observed failure — the Google false
-> positive — was a shared-unverified-premise correlated miss that heterogeneity
+> positive — was a shared-unverified-premise correlated miss that model-mixing
 > alone did not prevent. The debate claim still needs the `Slice:`-keyed
 > measurement and a two-rater protocol before any percentage ships.
 
 ## Next steps (unchanged from the queue, now better motivated)
 
-1. Live-run the Phase-2 contested-debate spike on one bed (portfolio
+1. Live-run the Phase-2 contested-debate spike on one bed (the equity-research bed
    recommended) — the Fable pass adds the strongest reason yet: the
    premature-consensus specimens are shared-premise events, exactly what blind
    position-commitment targets.

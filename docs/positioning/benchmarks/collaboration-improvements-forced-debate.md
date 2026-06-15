@@ -8,7 +8,7 @@ team-science / multi-agent-debate constructs.*
 
 Companion to
 [collaboration-sophistication-and-benchmarks](collaboration-sophistication-and-benchmarks-2026-06.md)
-and the [cross-codebase review](external-review-2026-06-cross-codebase.md).
+and the [cross-codebase review](../reviews/external-review-2026-06-cross-codebase.md).
 
 > **Premise update (after [benchmark-results](benchmark-results-2026-06.md)).** A
 > strict per-cycle rating *partially refuted* the "never debates" claim: the newest
@@ -17,7 +17,7 @@ and the [cross-codebase review](external-review-2026-06-cross-codebase.md).
 > and nothing reaches a true impasse (counter-positions get *corrected*, not
 > defended to deadlock). So these mechanisms should target *that 44%* — right-sized,
 > not an overhaul of a system that never argues. The larger *measured* defect is
-> communication hygiene (cc-aic ~30% duplicate messages), addressed separately. Keep
+> communication hygiene (the SaaS bed ~30% duplicate messages), addressed separately. Keep
 > that proportion in mind while reading the seven mechanisms below.
 
 ---
@@ -38,12 +38,12 @@ Three independent signals say the same thing:
    no cost to premature agreement and no credit for a defended dissent.
 
 The reviewer's instinct — named in the corpus itself — is to *confirm-the-
-implementer* (1iab `agent_comms_2026-05-10_ia-peer-suspicion.txt:347`). The
+implementer* (the mobile/marketplace bed `agent_comms_2026-05-10_ia-peer-suspicion.txt:347`). The
 existing countermeasures (rotating default-skeptic, mandatory spot-check on
 zero-finding reviews, ≥3 mutual falsification) raise the *floor* of scrutiny but
 do not manufacture *debate* — they make rubber-stamping harder, not disagreement
 richer. "Agreement is the failure mode, not the goal" is asserted as a slogan
-(1iab `…113538.md:19`) but not yet enforced as a gate.
+(the mobile/marketplace bed `…113538.md:19`) but not yet enforced as a gate.
 
 ## Design principles
 
@@ -67,10 +67,10 @@ richer. "Agreement is the failure mode, not the goal" is asserted as a slogan
 Before either coder reads the other, **both post a Position + Confidence under an
 Oya-held barrier**; Oya releases both simultaneously, then a reconciliation turn.
 - *Implementation:* `classify-slice.sh` already exists — add a `contested` /
-  `high-blast-radius` flag; for flagged slices Oya runs the portfolio
+  `high-blast-radius` flag; for flagged slices Oya runs the equity-research bed's
   **blind-protocol Phase 1/2** (already proven there:
   `2026-06-01_105001.txt:413` *"I will not react to @OPUS until both outputs are
-  posted and @OYA opens Phase 2"*) — generalize it from portfolio to all beds.
+  posted and @OYA opens Phase 2"*) — generalize it from the equity-research bed to all beds.
 - *Lineage:* breaks Clark-style anchoring; directly attacks "confirm-the-
   implementer." This is the single change most likely to move the SEI/convergence
   numbers.
@@ -90,7 +90,7 @@ explicit *"alternative X considered and rejected because Y (with evidence)."* A
 bare APPROVE is not a valid baton.
 - *Implementation:* extends the existing *mandatory-spot-check-on-zero-finding*
   rule into a *mandatory-dissent-or-documented-alternative* rule; codified per-agent
-  like STOP rule 23/14 already is (cc-aic `active.txt:1711`).
+  like STOP rule 23/14 already is (the SaaS bed `active.txt:1711`).
 - *Lineage:* CRM **two-challenge rule** — a team member is *obligated* to voice a
   concern, not merely permitted.
 
@@ -99,7 +99,7 @@ When both coders post **high confidence + agreement** on a **high-blast-radius**
 change, Oya does **not** clear it — she forces a falsification round (each agent
 must produce one concrete way the change breaks).
 - *Implementation:* Oya already issues `GO: no` and forces falsification ad hoc
-  (1iab `…162642.md:444`). Make it a deterministic rule keyed on
+  (the mobile/marketplace bed `…162642.md:444`). Make it a deterministic rule keyed on
   (blast_radius × confidence_agreement), not Oya's discretion.
 - *Lineage:* the corpus's own *"agreement is the failure mode"* finally enforced.
 
@@ -129,7 +129,7 @@ authority**, and records *which side won and why* — feeding the existing
 **shadow-review** so the framework keeps falsifying its own "unlike-pair is load-
 bearing" claim with real disagreement data, not just agreement data.
 - *Lineage:* MAD judge / debate adjudication; closes the loop with the
-  null-result discipline already in portfolio
+  null-result discipline already in the equity-research bed
   (`shadow-review/2026-06-08-cycle8.md:38`).
 
 ## Closing the loop: make the benchmark a live guardrail
@@ -179,9 +179,9 @@ this is instrumentation only, the measure-first step the proposal demands.
 
 | bed | N | zero_finding_approve | substantive | formal_dissent | SEI |
 |-----|---|----|----|----|----|
-| cc-aic | 849 | 0.674 | 0.082 | 0.244 | 0.053 |
-| 1-in-a-billion-paradise | 223 | 0.780 | 0.117 | 0.103 | 0.072 |
-| portfolio-experiment | 18 | 0.278 | 0.667 | 0.056 | 0.142 |
+| SaaS | 849 | 0.674 | 0.082 | 0.244 | 0.053 |
+| mobile/marketplace | 223 | 0.780 | 0.117 | 0.103 | 0.072 |
+| equity | 18 | 0.278 | 0.667 | 0.056 | 0.142 |
 
 **Two findings from the baseline run itself:**
 1. **Formal dissent is nearly unrecorded as a token.** The literal
@@ -199,9 +199,10 @@ this is instrumentation only, the measure-first step the proposal demands.
    that are rubber-stamp-*shaped*", and watch the *direction* they move when a
    mechanism is spiked, not their absolute level.
 
-The high portfolio `substantive` (0.667) vs low cc-aic/1iab (0.08–0.12) is the
-SEI story again: the portfolio (blind-protocol bed) records real findings far more
-often. That is the signal Phase 2 (#1 blind position-commitment) aims to spread.
+The high equity-research-bed `substantive` (0.667) vs low SaaS/mobile-marketplace
+(0.08–0.12) is the SEI story again: the equity-research bed (blind-protocol bed)
+records real findings far more often. That is the signal Phase 2 (#1 blind
+position-commitment) aims to spread.
 
 ## Recommended sequence
 

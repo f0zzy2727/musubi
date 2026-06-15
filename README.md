@@ -8,10 +8,10 @@ Most multi-agent tools treat agents as interchangeable workers — same task poo
 
 The orchestration tools manage capacity. Musubi manages quality.
 
-**Short visual primer (PDF):** [the musubi operating model](docs/positioning/musubi-operating-model.pdf) — the two configurations, Oya as guardian of intention, and where musubi sits in the landscape.
+**Short visual primer (PDF):** [the musubi operating model](docs/positioning/assets/musubi-operating-model.pdf) — the two configurations, Oya as guardian of intention, and where musubi sits in the landscape.
 **Full written rationale:** `docs/agents/PAIR_OPERATING_MODEL.md`.
 **The story behind it:** [*The Best AI Coding Team May Be Two Different Models With One Goal*](https://lugha.substack.com/p/the-best-ai-coding-team-may-be-two) — an 8-week experiment that became Musubi.
-**The specific finding that holds it up:** [*Asymmetric deference*](docs/positioning/asymmetric-deference.md) — what a three-way LLM review surfaced, and why two unlike models matter more than one strong one.
+**The specific finding that holds it up:** [*Asymmetric deference*](docs/positioning/essays/asymmetric-deference.md) — what a three-way LLM review surfaced, and why two unlike models matter more than one strong one.
 
 > *About the name.* *Musubi* (結び) is the Shinto idea of binding distinct things into a whole — two minds, one comms thread, one protocol. Pronounced *moo-soo-bee*. (Yes, also the Hawaiian rice-and-spam dish, which borrows the same word for the same reason.)
 
@@ -610,7 +610,7 @@ These stubs are project-owned — copy once and edit freely; musubi never refres
 ### Read more
 
 - The prompt + behavioural contract Oya runs under: [`docs/operator/oyakata-prompt-v0.1.md`](docs/operator/oyakata-prompt-v0.1.md).
-- The structural rationale (three-way LLM audit that surfaced asymmetric-deference): [`docs/positioning/external-review.md`](docs/positioning/external-review.md).
+- The structural rationale (three-way LLM audit that surfaced asymmetric-deference): [`docs/positioning/reviews/external-review-2026-06-cross-codebase.md`](docs/positioning/reviews/external-review-2026-06-cross-codebase.md).
 
 ---
 

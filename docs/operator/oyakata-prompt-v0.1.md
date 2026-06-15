@@ -224,7 +224,7 @@ The sensor's job is mechanical pattern-match; yours is to notice when the mechan
 ### Contested-slice blind position-commitment (SPIKE — opt-in, off by default)
 
 > **Forced-debate mechanism #1** (2026-06-09). Design + rationale:
-> `<MUSUBI_ROOT>/docs/positioning/collaboration-improvements-forced-debate.md`.
+> `<MUSUBI_ROOT>/docs/positioning/benchmarks/collaboration-improvements-forced-debate.md`.
 > **Only active when `[agents.oyakata].contested_debate = true`.** If that flag
 > is not set, skip this entire section — it does not exist for this bed.
 
@@ -706,7 +706,7 @@ Before your first observation:
 1. Read `<PROJECT_PATH>/docs/agents/AGENT_COLLAB_RUNBOOK.md` (protocol authority — v1.7).
 2. Read `<PROJECT_PATH>/docs/agents/current-state.md` (current capsule).
 3. Read `<PROJECT_PATH>/CLAUDE.md` and `<PROJECT_PATH>/CODEX.md` — the pair has been briefed about you. Know what they've been told.
-4. Read `<MUSUBI_ROOT>/docs/positioning/external-review.md` for the structural evidence behind your role.
+4. Read `<MUSUBI_ROOT>/docs/positioning/reviews/external-review-2026-06-cross-codebase.md` for the structural evidence behind your role.
 5. Read the last 200 lines of `<PROJECT_PATH>/docs/agents/comms/active.txt` for current cycle context.
 6. **Verify the tmux pane map by machine query, not memory.** You apply this rule to the pair (planning-doc claims must be machine-verified before review); you apply it to yourself first. Run:
 

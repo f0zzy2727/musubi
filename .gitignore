@@ -32,8 +32,8 @@ docs/operator/internal/
 
 # Internal strategy sketches + maintainer release-prep — anonymised, but
 # roadmap/positioning notes that aren't for public consumption.
-docs/positioning/v0.3-strategic-visual-sketch.md
-docs/positioning/receipts-first-skeptic-sketch.md
+docs/positioning/essays/v0.3-strategic-visual-sketch.md
+docs/positioning/essays/receipts-first-skeptic-sketch.md
 docs/operator/github-repo-metadata.md
 
 # Active comms transcript — gitignored; archive committed copies to docs/agents/archive/
@@ -67,3 +67,4 @@ __pycache__/
 
 # upgrade_project.py auto-backups (timestamped; safe to delete after verifying upgrade)
 *.backup-*
+.gstack/

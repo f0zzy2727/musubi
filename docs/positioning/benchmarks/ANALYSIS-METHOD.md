@@ -9,7 +9,7 @@ Outputs of one full pass (all in `docs/positioning/`):
 - `collaboration-sophistication-and-benchmarks-2026-06.md` — framework lenses + plan
 - `benchmark-results-2026-06.md` — Track 1 + Track 2 scored results
 - `collaboration-improvements-forced-debate.md` — design proposal from the weaknesses
-- `heterogeneous-vs-homogeneous.md` — the vendor-diversity question + experiment
+- `mixed-vs-same-models.md` — the vendor-diversity question + experiment
 - (date the filenames to the run so old passes stay comparable)
 
 ---
@@ -20,9 +20,9 @@ Three test-bed repos, each with a `docs/agents/` comms tree:
 
 | Test bed | Path | Domain |
 |---|---|---|
-| cc-aic / Slí | `~/Dev/aic/cc-aic/docs/agents` | production SaaS |
-| 1-in-a-billion-paradise | `~/Dev/1-in-a-billion-paradise/docs/agents` | mobile + marketplace |
-| portfolio-experiment | `~/Dev/portfolio-experiment/docs/agents` | equity research (non-software) |
+| the SaaS bed | `<saas-bed>/docs/agents` | production SaaS |
+| the mobile/marketplace bed | `<mobile-bed>/docs/agents` | mobile + marketplace |
+| the equity-research bed | `<equity-bed>/docs/agents` | equity research (non-software) |
 
 "Comms" = `archive/*.txt`, `archive/*.md`, and `comms/active.txt` under each
 `docs/agents`. Message format: a turn starts with `[@SPEAKER] [YYYY-MM-DD] [HH:MM TZ]`,
@@ -31,7 +31,7 @@ carries a `Type:` line, body sections (`Action/Evidence/Result/Next`), and ends 
 
 To discover any new/renamed corpora before a run:
 ```sh
-for r in ~/Dev/aic/cc-aic ~/Dev/1-in-a-billion-paradise ~/Dev/portfolio-experiment; do
+for r in <saas-bed> <mobile-bed> <equity-bed>; do
   find "$r/docs/agents" -type f \( -name '*comms*' -o -name 'active.txt' \) -not -name '*.lock'
 done
 ```
@@ -47,9 +47,9 @@ Quick counts to confirm the corpus grew and the protocol spine held. Use Python
 python3 - <<'PY'
 import os, re, glob
 repos = {
- 'cc-aic': os.path.expanduser('~/Dev/aic/cc-aic/docs/agents'),
- '1-in-a-billion': os.path.expanduser('~/Dev/1-in-a-billion-paradise/docs/agents'),
- 'portfolio': os.path.expanduser('~/Dev/portfolio-experiment/docs/agents'),
+ 'SaaS': '<saas-bed>/docs/agents',
+ 'mobile/marketplace': '<mobile-bed>/docs/agents',
+ 'equity': '<equity-bed>/docs/agents',
 }
 def files(d):
     out=[]
@@ -79,9 +79,9 @@ The reproducible core. One command, JSON out:
 
 ```sh
 python3 scripts/comms-metrics.py \
-  ~/Dev/aic/cc-aic/docs/agents \
-  ~/Dev/1-in-a-billion-paradise/docs/agents \
-  ~/Dev/portfolio-experiment/docs/agents \
+  <saas-bed>/docs/agents \
+  <mobile-bed>/docs/agents \
+  <equity-bed>/docs/agents \
   --json /tmp/comms-metrics.json
 ```
 
@@ -95,7 +95,7 @@ python3 scripts/comms-metrics.py \
 | `receipt_rate` | frac msgs with a SHA or `file:line` | hard-receipt discipline |
 | `role_divergence_SEI` | Jensen-Shannon div of the two coders' vocab (0=identical) | **low (0.05–0.14) = peers talk alike → groupthink risk** |
 | `overhead_TEI` | boilerplate-token fraction | protocol overhead |
-| `duplicate_msg_rate` | exact-dup message bodies ÷ msgs | **hygiene; cc-aic ~0.30 (incl. relay re-posts)** |
+| `duplicate_msg_rate` | exact-dup message bodies ÷ msgs | **hygiene; the SaaS bed ~0.30 (incl. relay re-posts)** |
 | `consec_neardup_rate` | same-speaker >0.8-overlap consecutive | ack spam |
 | `reviewer_finding_rate` | frac Review msgs raising a finding | **PROXY: independent-catch** |
 | `escape_admissions` | count of "both missed / CI caught / review escape" | **PROXY: correlated-miss** |
@@ -129,7 +129,7 @@ Spawn a fresh agent (no prior context) with this exact brief:
 
 > You are a strict, skeptical independent rater scoring multi-agent collaboration from
 > real comms transcripts. System: peer LLM coders @OPUS (Claude) + @CODA (Codex),
-> supervisor @OYA, human gate @MICHI/@LEAD. Read these files [list newest per bed].
+> supervisor @OYA, human gate @LEAD. Read these files [list newest per bed].
 > Cite a real quoted line for every score. Do not fabricate.
 >
 > **Instrument A — NOTECHS markers (0–10 each, per bed):** Cooperation; Leadership &
@@ -165,15 +165,15 @@ standard task set) than Tracks 1–2 (collaboration quality on real work).
 
 ---
 
-## 5. Phase E — heterogeneous vs homogeneous experiment (design, not yet run)
+## 5. Phase E — mixed models vs same models experiment (design, not yet run)
 
 Same protocol, same task set, three arms: **A** Claude+Codex, **B** Claude+Claude,
 **C** Codex+Codex. Score each with `comms-metrics.py` + the Track-2 rater. Key metric
 = **correlated-miss rate** (bugs *both* agents approved that CI/human later caught) —
-the column where heterogeneity should win if it wins anywhere. Predicted: B/C ≈ A on
+the column where model-mixing should win if it wins anywhere. Predicted: B/C ≈ A on
 throughput, A wins only on correlated-miss + SEI. Falsifier: if A's correlated-miss
-≈ B/C's, the value is the protocol, not the heterogeneity. See
-`heterogeneous-vs-homogeneous.md`.
+≈ B/C's, the value is the protocol, not the model-mixing. See
+`mixed-vs-same-models.md`.
 
 ---
 
@@ -207,7 +207,7 @@ throughput, A wins only on correlated-miss + SEI. Falsifier: if A's correlated-m
   spot-checkable). Track 3, E arms B/C: not yet run.
 - **Honest caveats to carry into every write-up:** proxy metrics are keyword-based;
   duplicate rate includes relay artifacts; single-rater convergence is indicative;
-  exchange-level convergence needs the `Slice:` protocol key; no homogeneous baseline
+  exchange-level convergence needs the `Slice:` protocol key; no same-model baseline
   exists yet.
 - **To make Track-1's convergence metrics live:** add a `Slice: <id>` line to review
   turns in the comms protocol so `comms-metrics.py` can group turns into exchanges.

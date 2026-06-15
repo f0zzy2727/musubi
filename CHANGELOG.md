@@ -357,8 +357,8 @@ First tagged release. Covers the project from initial public-shape through the o
   - **Slice Lanes** subsection: lightweight lane skips mandatory review + GO baton + capsule discipline for doc-only / single-file ≤20 LOC non-runtime / dep-bump / copy-edit work. Heavy lane keeps full protocol.
   - **"Findings I went looking for" block** (Review Pattern): every Review Result MUST list ≥3 specific defect classes the reviewer probed for with `found / not found / N/A and why` per line. Addresses the asymmetric-deference pattern.
   - **Spot-check on rubber-stamps**: third-party 5-minute spot-check when a review approves a slice with zero findings on >50 LOC or >3 files.
-- `docs/positioning/external-review.md`: synthesis of three independent LLM reviews (Gemini, Codex, Opus) of an 8-week production corpus. Captures convergent findings, divergent findings (the asymmetric-deference pattern only the third-party read surfaced), quantitative baseline.
-- `docs/positioning/asymmetric-deference.md`: follow-up essay drilling into the divergent finding — what only one of three reviewers caught, the structural explanation, the protocol change it triggered.
+- `docs/positioning/reviews/external-review-2026-06-cross-codebase.md`: synthesis of three independent LLM reviews (Gemini, Codex, Opus) of an 8-week production corpus. Captures convergent findings, divergent findings (the asymmetric-deference pattern only the third-party read surfaced), quantitative baseline.
+- `docs/positioning/essays/asymmetric-deference.md`: follow-up essay drilling into the divergent finding — what only one of three reviewers caught, the structural explanation, the protocol change it triggered.
 - `docs/examples/sample-cycle.md`: illustrative redacted slice-cycle showing the actual message protocol in action.
 - Cross-platform `launch_musubi_tmux.sh` for Linux / WSL / macOS without iTerm2.
 - `validate_config(cfg)` — walks `musubi.toml` against a required-shape map; raises `ConfigError` with the dotted path of the first missing key, wrong type, or empty string.

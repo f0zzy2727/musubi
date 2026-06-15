@@ -6,11 +6,11 @@ and (2) what independent, established frameworks could it be benchmarked against
 
 **Setup under study.** Two peer LLM coding agents (`@OPUS`, Claude / `@CODA`,
 Codex) reviewing each other's work, a supervisor agent (`@OYA`, 親方), and a human
-approval gate (`@MICHI` / `@LEAD`), communicating via a structured text protocol:
+approval gate (`@LEAD`), communicating via a structured text protocol:
 typed messages (`Type:` headers), explicit turn markers (`<OVER>`), evidence-receipt
 peer review, and `GO:` batons. Evidence is drawn from ~249k lines of real comms
 across three production test beds (see
-[cross-codebase review](external-review-2026-06-cross-codebase.md)).
+[cross-codebase review](../reviews/external-review-2026-06-cross-codebase.md)).
 
 All corpus quotes below are real lines with file citations. External frameworks
 cite authors/years; items not independently verified are flagged `(verify)`.
@@ -32,12 +32,12 @@ corpus shows observable evidence for **all eight**.
 
 | Salas construct | Evidence in corpus |
 |---|---|
-| **Team leadership** | Oya directs/sequences and rules on scope: *"STAND DOWN, do NOT implement… a feature @LEAD never wanted"* (1iab `…113538.md`); assigns reviewers: *"you'll be the reviewer for S3 + S5"* (cc-aic `active.txt:941`). |
-| **Mutual performance monitoring** | Coda stops Opus acting on stale state: *"@OPUS — STOP before you act on that warm-start. Your 14:50 snapshot is stale and contradicts live ground truth. Do not hold S6, do not re-push."* (cc-aic `active.txt:653`). |
-| **Backup behavior** | Coda redirects Opus to his real next action: *"S1 (Coda) is REVIEW-READY awaiting YOUR review — that is your next action"* (`active.txt:665`); Opus refuses to waste the human's effort: *"I am NOT signalling @LEAD to tap Buy… it would spend his purchase for no diagnostic gain"* (1iab `…232254.txt:1197`). |
+| **Team leadership** | Oya directs/sequences and rules on scope: *"STAND DOWN, do NOT implement… a feature @LEAD never wanted"* (the mobile/marketplace bed `…113538.md`); assigns reviewers: *"you'll be the reviewer for S3 + S5"* (the SaaS bed `active.txt:941`). |
+| **Mutual performance monitoring** | Coda stops Opus acting on stale state: *"@OPUS — STOP before you act on that warm-start. Your 14:50 snapshot is stale and contradicts live ground truth. Do not hold S6, do not re-push."* (the SaaS bed `active.txt:653`). |
+| **Backup behavior** | Coda redirects Opus to his real next action: *"S1 (Coda) is REVIEW-READY awaiting YOUR review — that is your next action"* (`active.txt:665`); Opus refuses to waste the human's effort: *"I am NOT signalling @LEAD to tap Buy… it would spend his purchase for no diagnostic gain"* (the mobile/marketplace bed `…232254.txt:1197`). |
 | **Adaptability** | A review miss mints a new rule: *"a lockfile-changing slice's review MUST independently run `npm run type-check`… Additions-only vetting is half a review"* (`active.txt:1273`), adopted + codified as STOP rule 23 (`active.txt:1711`). |
 | **Team orientation** | Agents prioritise the joint artifact over shipping their own work; the whole `GO` baton discipline subordinates individual progress to the pair's gate. |
-| **Shared mental models** *(mechanism)* | A "capsule" (`current-state.md`) is the shared representation, with an enforced write-discipline: *"Updated `current-state.md` first, then reposted the warm-start receipt after the capsule-stale guard fired"* (portfolio `…113307.txt:68`); *"per-slice matrix column is authority"* (`active.txt`). |
+| **Shared mental models** *(mechanism)* | A "capsule" (`current-state.md`) is the shared representation, with an enforced write-discipline: *"Updated `current-state.md` first, then reposted the warm-start receipt after the capsule-stale guard fired"* (the equity-research bed `…113307.txt:68`); *"per-slice matrix column is authority"* (`active.txt`). |
 | **Closed-loop communication** *(mechanism)* | Full transmit→read-back→verify→confirm: *"Read Opus's SHIPPED confirmation… and independently checked the live remote"* → *"Coda confirms the close-out is live on `origin/main`"* (`active.txt:39,46`). The `<OVER>` marker is a closed-loop primitive (ratio ~1.0–1.1 per `Type:` across all three beds). |
 | **Mutual trust** *(mechanism)* | Bounded, and interestingly *conditional* — trust is explicitly suspended for machine claims: *"Did NOT take @OYA's numbers on trust… Independently re-ran the diff"* (`active.txt:983`). Verify-don't-trust *is* the trust model. |
 
@@ -55,7 +55,7 @@ built around exactly musubi's two risk surfaces:
   accepting them (`active.txt:983`).
 - **Authority gradient** — CRM's documented accident cause is a *too-steep*
   gradient that suppresses juniors speaking up. This is precisely the
-  [asymmetric-deference](asymmetric-deference.md) finding restated in an
+  [asymmetric-deference](../essays/asymmetric-deference.md) finding restated in an
   established vocabulary: rubber-stamp deference = a too-steep gradient; the
   rotating `default-skeptic` countermeasure = deliberately flattening it. The
   2026-06-06 skip-permissions incident (an agent disabling its supervisor's safety
@@ -229,8 +229,8 @@ the process metrics are where musubi's actual claim lives.
 
 ---
 
-*Sources — corpus: `docs/agents/` archives in `~/Dev/aic/cc-aic`,
-`~/Dev/1-in-a-billion-paradise`, `~/Dev/portfolio-experiment` (grep + targeted read
+*Sources — corpus: `docs/agents/` archives in `<saas-bed>`,
+`<mobile-bed>`, `<equity-bed>` (grep + targeted read
 2026-06-09). External (selected): Salas, Sims & Burke 2005 (Small Group Research);
 Clark & Brennan 1991; Cannon-Bowers, Salas & Converse 1993; Wegner 1987; Grice 1975;
 Flin et al. NOTECHS ~2003; AutoGen (arXiv 2308.08155); MetaGPT; ChatDev; CAMEL;

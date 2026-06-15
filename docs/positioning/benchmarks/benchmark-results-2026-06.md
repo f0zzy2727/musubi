@@ -13,10 +13,10 @@ independent LLM rater reading the newest cycles in full, citing real lines.
 
 ## Track 1 — Deterministic comms metrics
 
-Computed over the full comms corpus per codebase (cc-aic 5,065 messages, 1iab
-1,691, portfolio 336).
+Computed over the full comms corpus per codebase (the SaaS bed 5,065 messages,
+the mobile/marketplace bed 1,691, the equity-research bed 336).
 
-| Metric (what it measures) | cc-aic | 1iab | portfolio |
+| Metric (what it measures) | SaaS | mobile/marketplace | equity |
 |---|---|---|---|
 | `<OVER>` per message — *closed-loop turn discipline* | 1.01 | 1.17 | 1.01 |
 | closed-loop ack rate — *frac msgs w/ explicit read-back/confirm* | 0.45 | 0.56 | 0.71 |
@@ -34,13 +34,14 @@ Computed over the full comms corpus per codebase (cc-aic 5,065 messages, 1iab
 - **Role-divergence (SEI) is low everywhere** (0.05–0.14). The two coders talk
   almost alike. This is the quantitative shadow of the qualitative "they converge
   easily" concern — the peers are not strongly differentiated at the language level.
-  Portfolio (the non-software, blind-protocol bed) is ~2–3× more differentiated,
-  consistent with its explicit constructor-vs-devil's-advocate role split.
-- **cc-aic carries ~30% exact-duplicate message bodies.** This is the hygiene
+  The equity-research bed (the non-software, blind-protocol bed) is ~2–3× more
+  differentiated, consistent with its explicit constructor-vs-devil's-advocate role split.
+- **The SaaS bed carries ~30% exact-duplicate message bodies.** This is the hygiene
   problem Track 2 flagged, now measured. *Caveat:* an unknown share is orchestrator
   **relay re-posting** across archive files (a known relay-flood class), not pure
-  agent redundancy — so read 0.296 as an upper bound on agent-side ack spam. 1iab
-  (0.05) shows the protocol *can* run clean; the gap is the actionable signal.
+  agent redundancy — so read 0.296 as an upper bound on agent-side ack spam. The
+  mobile/marketplace bed (0.05) shows the protocol *can* run clean; the gap is the
+  actionable signal.
 
 ## Track 2 — Independent LLM rating (newest cycles, full read)
 
@@ -48,20 +49,22 @@ NOTECHS behavioural markers (0–10), strict rater, every score line-cited:
 
 | Codebase | Cooperation | Leadership | Situation aware | Decision-making | Mean |
 |---|---|---|---|---|---|
-| cc-aic | 8 | 9 | 9 | 8 | **8.5** |
-| 1iab | 8 | 8 | 7 | 8 | **7.75** |
-| portfolio | 7 | 8 | 8 | 7 | **7.5** |
+| SaaS | 8 | 9 | 9 | 8 | **8.5** |
+| mobile/marketplace | 8 | 8 | 7 | 8 | **7.75** |
+| equity | 7 | 8 | 8 | 7 | **7.5** |
 | **Overall** | 7.7 | 8.3 | 8.0 | 7.7 | **7.9** |
 
-Strongest marker (Leadership 9, cc-aic): Oya's stale-state STOP catching an ~85-min
-clock skew + replayed evidence before a wrongful re-push. Weakest (SA 7, 1iab): a
-confidently-stated wrong generalization (*"the script does NOT exist anywhere"*),
-self-corrected two turns later — honest recovery, but the miss caps the score.
+Strongest marker (Leadership 9, the SaaS bed): Oya's stale-state STOP catching an
+~85-min clock skew + replayed evidence before a wrongful re-push. Weakest (SA 7, the
+mobile/marketplace bed): a confidently-stated wrong generalization (*"the script does
+NOT exist anywhere"*), self-corrected two turns later — honest recovery, but the miss
+caps the score.
 
-**MARBLE-style Communication Score: cc-aic 7 · 1iab 8 · portfolio 5 · overall 6.5.**
+**MARBLE-style Communication Score: the SaaS bed 7 · the mobile/marketplace bed 8 ·
+the equity-research bed 5 · overall 6.5.**
 Per-message rigor is high (surgical reviews with file:line findings); the score is
 dragged down by **redundancy**, not by weak content — confirming Track 1's
-duplicate-rate. portfolio's 5 reflects a message posted verbatim three times
+duplicate-rate. The equity-research bed's 5 reflects a message posted verbatim three times
 (append/EOF failure) plus shell-interpolation corruption stripping dollar values.
 
 ## Track 2C — Convergence quality (the headline re-test)
@@ -78,7 +81,7 @@ refutes it:**
 - **Rubber-stamps found: 0.** Every review carried a named "findings I went looking
   for" block.
 
-The best specimen (cc-aic S3): Oya probes a `0/0/0` audit line against a `+496/-1090`
+The best specimen (the SaaS bed S3): Oya probes a `0/0/0` audit line against a `+496/-1090`
 lockfile diff; Opus refuses to approve and sets a 3-item bar; Coda revises; Opus
 approves at 95% — then **CI catches a real escape neither caught**, forcing a repair
 round and a new codified STOP rule. Genuine adversarial convergence that surfaced a
@@ -96,7 +99,7 @@ converge in a single exchange, and no disagreement was ever held to a genuine
 ## What the numbers say to prioritize
 
 1. **Communication hygiene is the largest *measured* defect**, not convergence —
-   cc-aic's ~30% duplicate rate and the triple-posting are cheap to fix (the
+   the SaaS bed's ~30% duplicate rate and the triple-posting are cheap to fix (the
    comms-file LOCK + relay maxlen fixes already shipped address part of it;
    `duplicate_msg_rate` is now a regression metric to watch).
 2. **Low SEI** is the quantitative case for the rotating-adversary mechanism (#6 in
@@ -121,16 +124,17 @@ quality on real work) and do not depend on it.
 
 ```sh
 python3 scripts/comms-metrics.py \
-  ~/Dev/aic/cc-aic/docs/agents \
-  ~/Dev/1-in-a-billion-paradise/docs/agents \
-  ~/Dev/portfolio-experiment/docs/agents \
+  <saas-bed>/docs/agents \
+  <mobile-bed>/docs/agents \
+  <equity-bed>/docs/agents \
   --json /tmp/comms-metrics.json
 ```
 
-Track 2 is an LLM-rated pass over the newest cycle in each bed (cc-aic
-`comms/active.txt` + `archive/agent_comms_2026-06-09_hardening-sprint.txt`, 1iab
-`archive/comms-active-archive-20260606-113538.md`, portfolio
-`archive/agent_comms_2026-06-01_105001.txt`); re-run by handing those files to an
+Track 2 is an LLM-rated pass over the newest cycle in each bed (the SaaS bed
+`comms/active.txt` + `archive/agent_comms_2026-06-09_hardening-sprint.txt`, the
+mobile/marketplace bed `archive/comms-active-archive-20260606-113538.md`, the
+equity-research bed `archive/agent_comms_2026-06-01_105001.txt`); re-run by handing
+those files to an
 independent rater with the NOTECHS + Communication-Score + convergence-quality
 rubric.
 

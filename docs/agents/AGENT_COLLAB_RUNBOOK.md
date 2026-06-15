@@ -515,7 +515,7 @@ lane but `low` blast radius. Nothing today gates on it except one opt-in spike:
 reaches a review point runs Oya's **blind position-commitment** protocol: both
 coders post a Position + Confidence to Oya *before either reads the other*, then
 Oya releases both and opens reconciliation (forced-debate mechanism #1 — full
-spec in the Oya prompt + `docs/positioning/collaboration-improvements-forced-debate.md`).
+spec in the Oya prompt + `docs/positioning/benchmarks/collaboration-improvements-forced-debate.md`).
 Echo `Slice: <id>` on the blind-position posts and the resulting Review Results
 so `scripts/comms-metrics.py` can group turns and score
 `single_exchange_contested_rate`. When the flag is off (the default), nothing

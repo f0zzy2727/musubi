@@ -29,6 +29,6 @@ When musubi is launched with `[agents.oyakata].enabled = true` in its `musubi.to
 
 **Optional: state your confidence on each Review Result for Brier calibration.** You MAY add a `Confidence: <N>%` line to the Review Result header (0–100%) — your stated confidence that the slice is shippable in the state specified by your `Result:` field. When present, Oya assigns an outcome at cycle close (confirmed / partially-confirmed / disconfirmed) and accumulates per-reviewer Brier scores in `docs/agents/rules-ledger.yml`. Soft on-ramp: no protocol break if you skip it, but adopting builds a calibration corpus that surfaces over-confidence / under-confidence patterns over time. Full schema in the musubi repo at `docs/operator/calibration-schema.md`.
 
-**Why Oya exists, briefly:** the three-way external review on 2026-05-14 found that pair-only review has a structural ceiling on the failure modes it can self-detect (see `docs/positioning/external-review.md` in the musubi repo). Oya is the LLM-layer answer to that ceiling — judgement extension of the v1.7 mechanical guards.
+**Why Oya exists, briefly:** the three-way external review on 2026-05-14 found that pair-only review has a structural ceiling on the failure modes it can self-detect (see `docs/positioning/reviews/external-review-2026-06-cross-codebase.md` in the musubi repo). Oya is the LLM-layer answer to that ceiling — judgement extension of the v1.7 mechanical guards.
 
 <!-- musubi-oya-block:end -->
