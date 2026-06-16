@@ -19,6 +19,10 @@
 #   -m  path to the musubi checkout. Default: auto-detected (next to this
 #       script, current dir, ~/Desktop/musubi, ~/musubi, ~/Dev/musubi*)
 #   -d  how many days of chat transcripts to include (default: 14)
+#   -T  INCLUDE agent chat transcripts (Claude + Codex). OFF by default
+#       (privacy): transcripts can quote source, comms, and pasted secrets.
+#       When set, the bundle runs a best-effort secret-redaction pass before
+#       zipping. Without -T the bundle carries no transcripts at all.
 #   -o  where to write the zip (default: ~/Desktop, falls back to ~)
 #
 # What it collects PER APP (per toml):
@@ -40,9 +44,13 @@
 #   - musubi checkout git info + doctor.sh output (doctor reads musubi.toml only)
 #   - Codex CLI sessions + logs (recent only; ~/.codex is not per-project)
 #
-# PRIVACY: the zip contains chat transcripts, which may quote your source
-# code and comms. Review before sending. It never includes your projects'
-# source trees, credentials files, or .env files.
+# PRIVACY: by default this bundle contains NO chat transcripts. It collects
+# comms, capsule/agent docs, config tomls, and tmux scrollback — review before
+# sending. Pass -T to include Claude + Codex transcripts (which can quote your
+# source, comms, and pasted secrets); when you do, a best-effort secret-
+# redaction pass runs before zipping. It never includes your projects' source
+# trees, credentials files, or .env files (a file-level safety sweep enforces
+# this regardless). The MANIFEST lists which sensitive classes are present.
 #
 # bash 3.2 compatible (macOS default).
 
@@ -52,19 +60,21 @@ DAYS=14
 OUTDIR=""
 TOMLS=""
 MUSUBI_DIR_OPT=""
+INCLUDE_TRANSCRIPTS=0
 
-while getopts "c:d:m:o:h" opt; do
+while getopts "c:d:m:o:Th" opt; do
   case "$opt" in
     c) TOMLS="$TOMLS
 $OPTARG" ;;
     d) DAYS="$OPTARG" ;;
     m) MUSUBI_DIR_OPT="$OPTARG" ;;
     o) OUTDIR="$OPTARG" ;;
+    T) INCLUDE_TRANSCRIPTS=1 ;;
     h)
-      sed -n '2,45p' "$0"
+      sed -n '2,49p' "$0"
       exit 0
       ;;
-    *) echo "usage: $0 [-c musubi.toml]... [-m musubi-dir] [-d days] [-o outdir]" >&2; exit 2 ;;
+    *) echo "usage: $0 [-c musubi.toml]... [-m musubi-dir] [-d days] [-T] [-o outdir]" >&2; exit 2 ;;
   esac
 done
 
@@ -297,26 +307,31 @@ collect_app() {
     miss "[$stem] tmux session '$SESSION' (not running — orchestrator boot log unavailable)"
   fi
 
-  # Claude Code transcripts for THIS project path.
+  # Claude Code transcripts for THIS project path. OPT-IN (-T) — transcripts can
+  # quote source, comms, and pasted secrets, so they're excluded by default.
   # Claude Code stores them under ~/.claude/projects/<slug>/ where slug =
   # project path with every non-alphanumeric char replaced by '-'. Oya runs
   # as a Claude Code session cwd'd to the project, so her boot turns (which
   # files she actually Read) are in here.
-  SLUG="$(echo "$PROJ" | sed 's|[^A-Za-z0-9]|-|g')"
-  CC_DIR="$HOME/.claude/projects/$SLUG"
-  if [ -d "$CC_DIR" ]; then
-    mkdir -p "$B/$APP/chats/claude"
-    found_cc=0
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      cp "$f" "$B/$APP/chats/claude/" 2>/dev/null && found_cc=$((found_cc + 1))
-    done <<EOF_LIST
+  if [ "$INCLUDE_TRANSCRIPTS" -ne 1 ]; then
+    echo "EXCLUDED: [$stem] Claude transcripts (privacy default; pass -T to include)" >> "$MANIFEST"
+  else
+    SLUG="$(echo "$PROJ" | sed 's|[^A-Za-z0-9]|-|g')"
+    CC_DIR="$HOME/.claude/projects/$SLUG"
+    if [ -d "$CC_DIR" ]; then
+      mkdir -p "$B/$APP/chats/claude"
+      found_cc=0
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        cp "$f" "$B/$APP/chats/claude/" 2>/dev/null && found_cc=$((found_cc + 1))
+      done <<EOF_LIST
 $(find "$CC_DIR" -maxdepth 1 -name '*.jsonl' -mtime "-$DAYS" 2>/dev/null)
 EOF_LIST
-    echo "OK: [$stem] $found_cc Claude transcript(s) from $CC_DIR" >> "$MANIFEST"
-    [ "$found_cc" -eq 0 ] && miss "[$stem] Claude transcripts newer than $DAYS days in $CC_DIR"
-  else
-    miss "[$stem] $CC_DIR (no Claude Code transcripts for this project path)"
+      echo "OK: [$stem] $found_cc Claude transcript(s) from $CC_DIR" >> "$MANIFEST"
+      [ "$found_cc" -eq 0 ] && miss "[$stem] Claude transcripts newer than $DAYS days in $CC_DIR"
+    else
+      miss "[$stem] $CC_DIR (no Claude Code transcripts for this project path)"
+    fi
   fi
 }
 
@@ -328,22 +343,27 @@ $TOMLS
 EOF_TOMLS
 
 # --- global section 2: Codex CLI sessions + logs (not per-project) ---------------
-note "[global] Codex CLI sessions + logs (last $DAYS days)"
-if [ -d "$HOME/.codex" ]; then
-  mkdir -p "$B/chats/codex"
-  found_cx=0
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    rel_dir="$(dirname "${f#"$HOME"/.codex/}")"
-    mkdir -p "$B/chats/codex/$rel_dir"
-    cp "$f" "$B/chats/codex/$rel_dir/" 2>/dev/null && found_cx=$((found_cx + 1))
-  done <<EOF_LIST
+# OPT-IN (-T) — same privacy rationale as the Claude transcripts above.
+if [ "$INCLUDE_TRANSCRIPTS" -ne 1 ]; then
+  echo "EXCLUDED: Codex CLI transcripts (privacy default; pass -T to include)" >> "$MANIFEST"
+else
+  note "[global] Codex CLI sessions + logs (last $DAYS days)"
+  if [ -d "$HOME/.codex" ]; then
+    mkdir -p "$B/chats/codex"
+    found_cx=0
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      rel_dir="$(dirname "${f#"$HOME"/.codex/}")"
+      mkdir -p "$B/chats/codex/$rel_dir"
+      cp "$f" "$B/chats/codex/$rel_dir/" 2>/dev/null && found_cx=$((found_cx + 1))
+    done <<EOF_LIST
 $(find "$HOME/.codex/sessions" "$HOME/.codex/log" -type f -mtime "-$DAYS" 2>/dev/null)
 EOF_LIST
-  echo "OK: $found_cx Codex file(s)" >> "$MANIFEST"
-  [ "$found_cx" -eq 0 ] && miss "Codex files newer than $DAYS days under ~/.codex"
-else
-  miss "~/.codex (Codex CLI artifacts)"
+    echo "OK: $found_cx Codex file(s)" >> "$MANIFEST"
+    [ "$found_cx" -eq 0 ] && miss "Codex files newer than $DAYS days under ~/.codex"
+  else
+    miss "~/.codex (Codex CLI artifacts)"
+  fi
 fi
 
 # --- safety sweep: never ship obvious secrets -------------------------------------
@@ -351,6 +371,33 @@ find "$B" \( -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name 'id_rsa*' 
   -o -name 'credentials*' -o -name '*.key' \) -type f -delete 2>/dev/null
 echo "---" >> "$MANIFEST"
 echo "safety sweep: removed any .env/.pem/key/credentials files from bundle" >> "$MANIFEST"
+
+# --- redaction pass: mask pasted secrets (only meaningful with transcripts) -------
+REDACTOR="$MUSUBI_DIR/scripts/redact-bundle.py"
+if [ "$INCLUDE_TRANSCRIPTS" -eq 1 ]; then
+  if command -v python3 >/dev/null 2>&1 && [ -f "$REDACTOR" ]; then
+    redact_summary="$(python3 "$REDACTOR" "$B" 2>/dev/null)"
+    echo "redaction: ${redact_summary:-ran (no summary)}" >> "$MANIFEST"
+  else
+    echo "redaction: SKIPPED (python3 or redact-bundle.py unavailable) — review transcripts by hand" >> "$MANIFEST"
+  fi
+else
+  echo "redaction: n/a (no transcripts included)" >> "$MANIFEST"
+fi
+
+# --- sensitive-class manifest: declare what classes the bundle carries ------------
+{
+  echo "---"
+  echo "SENSITIVE CLASSES IN THIS BUNDLE:"
+  echo "- comms + capsule + agent docs ........ YES (always)"
+  echo "- config tomls (paths/handles) ........ YES (secrets are not stored in toml)"
+  echo "- tmux pane scrollback ................ when a session was live (see per-app lines above)"
+  if [ "$INCLUDE_TRANSCRIPTS" -eq 1 ]; then
+    echo "- agent chat transcripts (Claude/Codex) INCLUDED via -T — redaction pass applied"
+  else
+    echo "- agent chat transcripts (Claude/Codex) EXCLUDED (default; pass -T to include)"
+  fi
+} >> "$MANIFEST"
 
 # --- zip ---------------------------------------------------------------------------
 [ -z "$OUTDIR" ] && { [ -d "$HOME/Desktop" ] && OUTDIR="$HOME/Desktop" || OUTDIR="$HOME"; }
@@ -368,5 +415,10 @@ SIZE="$(du -h "$ZIP" | cut -f1)"
 echo ""
 echo "Bundle ready: $ZIP ($SIZE)"
 echo ""
-echo "REVIEW BEFORE SENDING: the chats/ folders contain agent transcripts,"
-echo "which can quote your source code and comms. Unzip and skim if unsure."
+if [ "$INCLUDE_TRANSCRIPTS" -eq 1 ]; then
+  echo "REVIEW BEFORE SENDING: -T included agent transcripts (chats/). A best-effort"
+  echo "redaction pass ran, but it is not a guarantee — unzip and skim before sending."
+else
+  echo "No transcripts included (default). See MANIFEST.txt for the sensitive classes"
+  echo "present; pass -T to include Claude + Codex transcripts (redacted) if needed."
+fi

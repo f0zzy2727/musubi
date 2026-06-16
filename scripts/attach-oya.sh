@@ -277,42 +277,22 @@ fi
 oyakata_cwd="$MUSUBI_ROOT/docs/operator"
 OYA_CLAUDE_DIR="$oyakata_cwd/.claude"
 mkdir -p "$OYA_CLAUDE_DIR"
-cat > "$OYA_CLAUDE_DIR/settings.local.json" <<JSON
-{
-  "permissions": {
-    "allow": [
-      "Read($TARGET/**)",
-      "Read($MUSUBI_ROOT/**)",
-      "Edit($TARGET/docs/agents/oyakata-log.md)",
-      "Edit($TARGET/docs/agents/comms/active.txt)",
-      "Edit($TARGET/docs/agents/operator-actions.md)",
-      "Write($TARGET/docs/agents/operator-actions.md)",
-      "Edit($TARGET/docs/agents/operator-channel.md)",
-      "Write($TARGET/docs/agents/operator-channel.md)",
-      "Edit($TARGET/docs/agents/asymmetry/**)",
-      "Edit($TARGET/docs/agents/rules-ledger.yml)",
-      "Edit($TARGET/docs/agents/shadow-review/**)",
-      "Edit($TARGET/docs/agents/operator-critique/**)",
-      "Edit($TARGET/docs/agents/oyakata-pending/**)",
-      "Write($TARGET/docs/agents/oyakata-log.md)",
-      "Write($TARGET/docs/agents/asymmetry/**)",
-      "Write($TARGET/docs/agents/rules-ledger.yml)",
-      "Write($TARGET/docs/agents/shadow-review/**)",
-      "Write($TARGET/docs/agents/operator-critique/**)",
-      "Write($TARGET/docs/agents/oyakata-pending/**)",
-      "Read($TARGET/docs/agents/oyakata-pending/**)",
-      "Bash(tmux list-panes:*)",
-      "Bash(tmux capture-pane:*)",
-      "Bash(tmux list-sessions:*)",
-      "Bash(date:*)",
-      "Bash(ls:*)",
-      "Bash(wc:*)",
-      "Bash(pwd)"
-    ]
-  }
-}
-JSON
-log "wrote scoped Oya permissions to $OYA_CLAUDE_DIR/settings.local.json"
+# Render the JSON via a Python helper, not a heredoc (robust-1): a project path
+# containing a quote, backslash, or `$` would corrupt heredoc-interpolated JSON,
+# and the heredoc broke CLAUDE.md rule #1. python3 is a hard musubi dependency
+# (the orchestrator is Python); if it's somehow absent, skip the pre-approval
+# and let Oya fall back to one-time permission prompts rather than write
+# possibly-malformed JSON.
+OYA_SETTINGS_WRITER="$MUSUBI_ROOT/scripts/write-oya-settings.py"
+if command -v python3 >/dev/null 2>&1 && [ -f "$OYA_SETTINGS_WRITER" ]; then
+  if python3 "$OYA_SETTINGS_WRITER" "$TARGET" "$MUSUBI_ROOT" "$OYA_CLAUDE_DIR/settings.local.json"; then
+    log "wrote scoped Oya permissions to $OYA_CLAUDE_DIR/settings.local.json"
+  else
+    log "WARNING: write-oya-settings.py failed — Oya will fall back to permission prompts"
+  fi
+else
+  log "WARNING: python3 or write-oya-settings.py unavailable — skipping Oya pre-approval (permission prompts will appear)"
+fi
 
 # --- Step 6: add Oya pane (idempotent) ----------------------------
 if [ "$OYAKATA_EXISTED" -eq 0 ]; then
