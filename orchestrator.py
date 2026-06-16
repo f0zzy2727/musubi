@@ -2325,7 +2325,9 @@ def attach_to_musubi(config_path="musubi.toml", session_override=None):
     watch_and_relay(p_claude, p_codex, cfg, session=session)
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    """Console entry point (pyproject `musubi` script) and `python orchestrator.py`.
+    Returns a process exit code; never raises for the expected error paths."""
     # Fail fast on native Windows. Musubi's runtime is tmux + libtmux, which
     # do not run on native Windows (cmd/PowerShell); a launch there fails deep
     # inside the relay with confusing errors that read like portability bugs.
@@ -2339,14 +2341,14 @@ if __name__ == "__main__":
             "See the Prerequisites section of the README.",
             file=sys.stderr,
         )
-        sys.exit(2)
+        return 2
 
     import argparse
     parser = argparse.ArgumentParser(description="Musubi orchestrator: launch or re-attach the agent relay.")
     parser.add_argument("config", nargs="?", default="musubi.toml", help="Path to musubi.toml (default: musubi.toml)")
     parser.add_argument("session", nargs="?", default=None, help="Override tmux session name from config")
     parser.add_argument("--attach", action="store_true", help="Reuse existing tmux session and resume only the watcher (skips briefing/relay test).")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.attach:
@@ -2355,12 +2357,17 @@ if __name__ == "__main__":
             start_musubi(args.config, args.session)
     except ConfigError as e:
         print(f"musubi: {e}", file=sys.stderr)
-        sys.exit(2)
+        return 2
     except FileNotFoundError as e:
         print(f"musubi: config file not found: {e.filename}", file=sys.stderr)
-        sys.exit(2)
+        return 2
     except KeyboardInterrupt:
         # Ctrl+C during the watcher (or any setup prompt). The tmux session
         # and agent panes are left intact so the user can resume with --attach.
         print("\nmusubi: stopped by user. Tmux session and agent panes are unchanged.", file=sys.stderr)
-        sys.exit(130)
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

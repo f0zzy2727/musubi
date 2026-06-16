@@ -71,3 +71,9 @@ __pycache__/
 
 # Codex-facing instruction copy — local mirror of CLAUDE.md, not tracked
 AGENTS.md
+
+# Python build artifacts (pip install -e . / build / dist)
+*.egg-info/
+build/
+dist/
+.eggs/

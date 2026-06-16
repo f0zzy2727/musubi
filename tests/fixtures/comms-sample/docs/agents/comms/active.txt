@@ -1,0 +1,88 @@
+[@OPUS] [2026-01-10] [09:00 UTC]
+Type: Claim
+Slice: S1-token-expiry
+Action: Claiming S1 — token-expiry check in auth middleware uses `<` where it should be `<=`, so a token expiring exactly on the boundary second is treated as valid.
+Next: implement + add a boundary test, then request review.
+<OVER>
+
+[@OPUS] [2026-01-10] [09:40 UTC]
+Type: Review Request
+Slice: S1-token-expiry
+Action: S1 ready. Changed the comparison and added test_token_expiry_boundary.
+Evidence: src/auth/middleware.py:88, tests/test_auth.py:142 — 3 new assertions, suite green.
+Reply required: @CODA review.
+<OVER>
+
+[@CODA] [2026-01-10] [10:05 UTC]
+Type: Review Result
+Slice: S1-token-expiry
+Result: The fix is correct, but I found a gap in coverage.
+- Found a defect: the new test covers the exp boundary only; a token with an iat in the future still passes (no issued-at check).
+Evidence: tests/test_auth.py:142 covers exp; no iat assertion.
+Next: add an iat guard + test before GO.
+<OVER>
+
+[@OPUS] [2026-01-10] [10:30 UTC]
+Type: Claim
+Slice: S1-token-expiry
+Action: Good catch. Added iat-in-future rejection + test_token_iat_future.
+Evidence: src/auth/middleware.py:91, tests/test_auth.py:151.
+<OVER>
+
+[@CODA] [2026-01-10] [10:50 UTC]
+Type: Review Result
+Slice: S1-token-expiry
+Result: Confirmed — both boundaries covered now, no further findings. Approve.
+Evidence: re-read middleware.py:88-93, ran tests/test_auth.py (12 passed).
+<OVER>
+
+[@MICHI] [2026-01-10] [11:00 UTC]
+Type: Decision
+Slice: S1-token-expiry
+GO: yes
+Action: Approved. Ship S1.
+<OVER>
+
+[@CODA] [2026-01-10] [11:30 UTC]
+Type: Claim
+Slice: S2-rate-limit
+Action: Claiming S2 — add a per-IP rate limit to the login endpoint. Proposing a fixed-window counter in Redis.
+<OVER>
+
+[@OPUS] [2026-01-10] [12:10 UTC]
+Type: Review Request
+Slice: S2-rate-limit
+Action: S2 ready — fixed-window counter, 10 attempts / 60s / IP.
+Evidence: src/auth/ratelimit.py:1-64, tests/test_ratelimit.py — 5 cases.
+Reply required: @CODA review.
+<OVER>
+
+[@CODA] [2026-01-10] [12:35 UTC]
+Type: Review Result
+Slice: S2-rate-limit
+Result: Changes required — do not ship. A fixed window lets an attacker send 20 attempts across a window boundary (10 at 0:59, 10 at 1:00). The slice goal was abuse resistance; this design doesn't meet it.
+- Found a defect: ratelimit.py:40 resets the counter on window roll, so the boundary burst is unbounded.
+Evidence: tests/test_ratelimit.py has no boundary-burst case.
+Next: redesign as a sliding window or token bucket before any GO.
+<OVER>
+
+[@OPUS] [2026-01-10] [13:15 UTC]
+Type: Claim
+Slice: S2-rate-limit
+Action: Dissent accepted — the boundary burst is real. Reworked to a sliding-window log; 10 attempts in any trailing 60s.
+Evidence: src/auth/ratelimit.py rewritten 1-72, tests/test_ratelimit.py:1-90 incl. test_boundary_burst.
+<OVER>
+
+[@CODA] [2026-01-10] [13:40 UTC]
+Type: Review Result
+Slice: S2-rate-limit
+Result: Confirmed — boundary-burst case now fails closed at 10. No further findings. Approve.
+Evidence: ran tests/test_ratelimit.py (9 passed) incl. test_boundary_burst.
+<OVER>
+
+[@MICHI] [2026-01-10] [13:50 UTC]
+Type: Decision
+Slice: S2-rate-limit
+GO: yes
+Action: Approved. The dissent made this slice materially better — ship S2.
+<OVER>

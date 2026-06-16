@@ -1,0 +1,39 @@
+{
+  "comms-sample": {
+    "messages": 12,
+    "speakers": {
+      "OPUS": 5,
+      "CODA": 5,
+      "MICHI": 2
+    },
+    "over_markers": 12,
+    "over_per_msg": 1.0,
+    "type_distribution": {
+      "Review": 6,
+      "Claim": 4,
+      "Decision": 2
+    },
+    "review_req": 2,
+    "review_res": 4,
+    "review_res_per_req": 2.0,
+    "go_yes_batons": 2,
+    "closed_loop_ack_rate": 0.167,
+    "evidence_block_rate": 0.667,
+    "receipt_rate": 0.583,
+    "role_divergence_SEI": 0.4202,
+    "overhead_TEI": 0.0294,
+    "duplicate_msg_rate": 0.0,
+    "consec_neardup_rate": 0.0,
+    "review_msgs": 6,
+    "reviewer_finding_rate": 0.333,
+    "escape_admissions": 0,
+    "review_results": 4,
+    "zero_finding_approve_rate": 0.5,
+    "substantive_review_rate": 0.25,
+    "formal_dissent_rate": 0.25,
+    "contested_slices": 2,
+    "single_exchange_contested_rate": 0.0,
+    "multi_round_contested_rate": 1.0,
+    "avg_tokens_per_msg": 34.0
+  }
+}
