@@ -140,7 +140,7 @@ def run(input_file):
     _print_header()
     reader = Reader(sys.stdin.fileno())
     while True:
-        sys.stdout.write("you → ")
+        sys.stdout.write("\n" + BOLD + CYAN + "YOU → " + RESET)
         sys.stdout.flush()
         body = reader.next_message()
         if body is None:
