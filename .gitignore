@@ -68,3 +68,6 @@ __pycache__/
 # upgrade_project.py auto-backups (timestamped; safe to delete after verifying upgrade)
 *.backup-*
 .gstack/
+
+# Codex-facing instruction copy — local mirror of CLAUDE.md, not tracked
+AGENTS.md
