@@ -40,25 +40,20 @@ _spec.loader.exec_module(oya_pretooluse)
 
 class TestClassifyBash:
     @pytest.mark.parametrize("cmd", [
+        # METADATA-ONLY: reveal status/refs/names/stats, never file content.
         "git status",
         "git status -s",
         "git status --short --branch",
-        "git log",
+        "git log --oneline",
         "git log --oneline -10",
-        "git diff",
-        "git diff HEAD~1",
-        "git show HEAD",
+        "git log --oneline -n 20",
         "git branch",
         "git branch -l",
         "git branch --list",
         "git branch -a",
         "git rev-parse HEAD",
-        "git config --get user.email",
-        "git config --list",
-        "git remote",
-        "git remote -v",
         "git ls-files",
-        "git blame README.md",
+        "git ls-tree HEAD",
         "pwd",
         "whoami",
         "date",
@@ -71,11 +66,70 @@ class TestClassifyBash:
         "which python3",
         "command -v node",
         "type cd",
-        "echo hello",
     ])
     def test_safe_commands_auto_approve(self, cmd):
         ok, reason = oya_pretooluse.classify_bash(cmd)
         assert ok is True, f"expected allow for {cmd!r}, got defer: {reason}"
+
+    @pytest.mark.parametrize("cmd", [
+        # sec-1 (2026-06-16): "non-mutating" is NOT "safe to disclose". These
+        # reads leak file content / config / credentials and must DEFER by
+        # default. The auditor's exact attack cases are included.
+        "git show HEAD",
+        "git show HEAD:.env",          # prints a tracked secret file's contents
+        "git diff",
+        "git diff HEAD~1",
+        "git log",                     # general log; `git log -p` shows patches
+        "git log -p",
+        "git blame README.md",         # prints file content lines
+        "git config --get user.email",
+        "git config --get http.extraheader",   # credential-bearing header
+        "git config --list",           # dumps all config incl. creds
+        "git remote",
+        "git remote -v",               # remote URLs may embed user:token@host
+    ])
+    def test_disclosure_commands_defer_by_default(self, cmd):
+        """Content/config-disclosing reads defer unless the operator opts in."""
+        ok, reason = oya_pretooluse.classify_bash(cmd)
+        assert ok is False, f"disclosure command {cmd!r} must defer by default, was auto-approved ({reason})"
+
+    @pytest.mark.parametrize("cmd", [
+        "git show HEAD",
+        "git diff",
+        "git log",
+        "git config --list",
+        "git remote -v",
+    ])
+    def test_disclosure_commands_allow_when_opted_in(self, cmd, monkeypatch):
+        """[security].repo_has_no_secrets (env MUSUBI_REPO_HAS_NO_SECRETS) lets an
+        operator who knows the repo is clean re-enable the disclose tier."""
+        monkeypatch.setenv("MUSUBI_REPO_HAS_NO_SECRETS", "1")
+        ok, _ = oya_pretooluse.classify_bash(cmd)
+        assert ok is True, f"opt-in should auto-approve {cmd!r}"
+
+    @pytest.mark.parametrize("cmd", [
+        # Bare `$` env expansion → defer, even with the disclose opt-in on.
+        # The opt-in only relaxes the git disclose tier, never expansion/cat.
+        "echo $TOKEN",
+        "echo ${AWS_SECRET_ACCESS_KEY}",
+        "ls $HOME/.ssh",
+        "git show $REF",
+        "cat .env",
+        "printenv",
+    ])
+    def test_expansion_and_content_readers_defer_even_with_opt_in(self, cmd, monkeypatch):
+        monkeypatch.setenv("MUSUBI_REPO_HAS_NO_SECRETS", "1")
+        ok, _ = oya_pretooluse.classify_bash(cmd)
+        assert ok is False, f"{cmd!r} must defer regardless of opt-in"
+
+    @pytest.mark.parametrize("cmd", [
+        # `echo` was removed from the allowlist entirely.
+        "echo hello",
+        "echo $TOKEN",
+    ])
+    def test_echo_defers(self, cmd):
+        ok, _ = oya_pretooluse.classify_bash(cmd)
+        assert ok is False, f"echo is no longer auto-approved; {cmd!r} must defer"
 
     @pytest.mark.parametrize("cmd", [
         # Disclose arbitrary file CONTENTS — must NOT auto-approve. Normal file
@@ -109,7 +163,7 @@ class TestClassifyBash:
         "echo hi\nmv important.db /tmp/",
     ])
     def test_newline_injection_defers(self, cmd):
-        """Regression: SAFE_BASH_PATTERNS anchor at string start (re.match), so
+        """Regression: allowlist patterns anchor at string start (re.match), so
         without a newline fence a multi-line command auto-approved its payload."""
         ok, _ = oya_pretooluse.classify_bash(cmd)
         assert ok is False, f"newline-injection {cmd!r} must defer, was auto-approved"
@@ -298,6 +352,19 @@ class TestEndToEnd:
         r = self._run("Bash", {"command": "git push"}, tmp_path / "log.md")
         assert r.returncode == 0
         assert r.stdout == ""
+
+    @pytest.mark.parametrize("cmd", [
+        "git show HEAD:.env",   # sec-1 headline: must not auto-approve a tracked secret
+        "echo $TOKEN",          # env-expansion disclosure
+        "git config --list",
+        "git remote -v",
+    ])
+    def test_bash_disclosure_command_emits_no_output(self, cmd, tmp_path):
+        """End-to-end: the auditor's disclosure cases produce no allow JSON, so
+        Claude Code falls through to its normal permission prompt."""
+        r = self._run("Bash", {"command": cmd}, tmp_path / "log.md")
+        assert r.returncode == 0
+        assert r.stdout == "", f"{cmd!r} should not emit an allow decision"
 
     def test_write_emits_no_output(self, tmp_path):
         r = self._run(

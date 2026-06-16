@@ -96,11 +96,21 @@ session_name = "musubi"                  # tmux session name — change if runni
 # --- Optional: [agents.oyakata.permissions] block (oyakata-2 PreToolUse hook) -
 # Auto-approves a small fixed allowlist of read-only operations on Opus's
 # Claude Code so it doesn't halt on permission prompts for `Read`, `Grep`,
-# `Glob`, `NotebookRead`, or read-only Bash commands (`git status`/`log`/
-# `diff`/`show`, `pwd`, `ls`, `cat`, `head`/`tail`, `wc`, `file`, `stat`,
-# `which`, etc.). Anything containing a shell metacharacter (|, >, <, ;, &,
-# $(, backtick) defers regardless. Everything else falls through to the
-# normal permission flow — the operator still decides on state changes.
+# `Glob`, `NotebookRead`, or METADATA-ONLY Bash commands (`git status`/
+# `branch`/`rev-parse`/`ls-files`, `git log --oneline`, `pwd`, `ls`, `wc`,
+# `file`, `stat`, `which`, etc.). Anything containing a shell metacharacter
+# (|, >, <, ;, &, $, $(, backtick) defers regardless — note `$` (any env
+# expansion) is fenced so `echo $TOKEN` never auto-approves. Everything else
+# falls through to the normal permission flow — the operator still decides.
+#
+# DISCLOSURE-AWARE (sec-1, 2026-06-16). "Non-mutating" is not "safe to
+# disclose": commands that print file CONTENT or config/credentials —
+# `git show`, `git diff`, `git log` (general), `git config`, `git remote -v`,
+# `git blame` — DEFER by default, because `git show HEAD:.env` discloses a
+# tracked secret just as `cat .env` would. `cat`/`head`/`tail`/`printenv`/`env`
+# are never auto-approved at all. If you know this repo holds no secrets worth
+# protecting from a read, opt back into the disclose tier with the [security]
+# block below.
 #
 # Closes the canonical Opus-halted-on-permission case from the 2026-05-15
 # spike (~2 hours blocked on a read prompt). See docs/operator/oyakata-permissions.md
@@ -123,6 +133,20 @@ session_name = "musubi"                  # tmux session name — change if runni
 #
 # [agents.oyakata.permissions]
 # enabled = true                              # opt into the PreToolUse hook layer
+
+# --- Optional: [security] block --------------------------------------------
+# repo_has_no_secrets re-enables auto-approval of the content/config-disclosing
+# read commands (`git show`/`diff`/`log`/`config`/`remote`/`blame`) that the
+# PreToolUse hook defers by default. Set it ONLY if this repo contains nothing
+# you'd mind a read disclosing (no tracked .env, no credential-bearing git
+# config/remotes, no secrets in history). Leaving it unset is the safe default.
+# Bare-`$` env expansion and `cat`/`printenv` are NEVER re-enabled by this flag.
+#
+# Surfaced to the hook via the MUSUBI_REPO_HAS_NO_SECRETS env var; you can also
+# export that directly in your shell before launch.
+#
+# [security]
+# repo_has_no_secrets = false                 # true = opt into the disclose tier
 
 # --- Optional: [requires.skills] block (v0.3+ strategic-Oya prereq) --------
 # Strategic-Oya (v0.3 and later) leans on gstack for the engineering-discipline

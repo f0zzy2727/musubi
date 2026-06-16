@@ -11,16 +11,18 @@ Two tiers ship today:
 
 A Claude Code `PreToolUse` hook (`scripts/oya-pretooluse.py`) that auto-approves a narrow, fixed set of read-only operations on Opus's pane. Everything else falls through to Claude Code's normal permission flow — the operator still decides on any state-changing action.
 
-**Tier-1 allowlist:**
+**Tier-1 allowlist (disclosure-aware since sec-1, 2026-06-16):**
 - Tools that are read-only by construction: `Read`, `Grep`, `Glob`, `NotebookRead`.
-- Bash commands matching a short list of read-only patterns: `git status`/`log`/`diff`/`show`/`branch`/`rev-parse`/`config --get`/`config --list`/`remote`/`ls-files`/`ls-tree`/`blame`, plus `pwd`/`whoami`/`date`/`ls`/`cat`/`head`/`tail`/`wc`/`file`/`stat`/`which`/`command -v`/`type`/`echo`/`printenv`/`env`.
-- Bash commands containing **any** shell metacharacter (`|`, `>`, `<`, `;`, `&`, `$(`, backtick) defer regardless of the command head. Conservative: `git log --grep="foo|bar"` will not auto-approve. The cost is one extra permission prompt; the safety margin is large.
+- **Metadata-only Bash** (auto-approved): `git status`/`branch`/`rev-parse`/`ls-files`/`ls-tree`, `git log --oneline` (summary form only), plus `pwd`/`whoami`/`date`/`ls`/`wc`/`file`/`stat`/`which`/`command -v`/`type`. These reveal status/refs/names/stats — never file content.
+- **Content/config-disclosing Bash** (defer by default; opt-in via `[security].repo_has_no_secrets`): `git show`/`diff`/`log` (general)/`blame`, `git config --get`/`--list`, `git remote -v`. Rationale: "non-mutating" is not "safe to disclose" — `git show HEAD:.env` prints a tracked secret exactly as `cat .env` would.
+- **Never auto-approved at all:** `cat`/`head`/`tail` (arbitrary file contents), `printenv`/`env` (environment incl. API keys), `echo` (removed — cleanest env-expansion vector).
+- Bash commands containing **any** shell metacharacter **or `$` expansion** (`|`, `>`, `<`, `;`, `&`, `$`, `$(`, backtick, newline) defer regardless of the command head. `$` is fenced so `echo $TOKEN` / `ls $HOME` never auto-approve. Conservative: `git log --grep="foo|bar"` will not auto-approve. The cost is one extra permission prompt; the safety margin is large.
 
 **Out of scope (deferred to v0.2.x+):**
 - Oya-as-decider (hook consults Oya's pane for judgement using slice context).
 - The full 4-tier ladder (in-context writes, escalation, blocklist).
 - Codex/Coda parity (the Codex hook protocol is different — separate slice).
-- The hardcoded allowlist (script-internal) stays the source of truth. The toml only toggles auto-wiring on/off — there's no `allow_extra` / `deny_extra` yet.
+- The hardcoded allowlist (script-internal) stays the source of truth. The toml toggles auto-wiring on/off and (since sec-1) the disclose-tier opt-in `[security].repo_has_no_secrets`; there's still no per-command `allow_extra` / `deny_extra`. Note: the disclose opt-in currently reads the `MUSUBI_REPO_HAS_NO_SECRETS` env var — the orchestrator auto-export from the toml block is the remaining sec-1 slice (until then, export it in your shell before launch).
 
 The deferred-work backlog is tracked in the author's working notes (not in this repo).
 

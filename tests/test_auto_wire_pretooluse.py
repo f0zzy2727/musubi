@@ -26,15 +26,19 @@ import oyakata
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _cfg(enabled: bool) -> dict:
-    """Minimal cfg shape the auto-wirer reads."""
-    return {
+def _cfg(enabled: bool, no_secrets: bool = False) -> dict:
+    """Minimal cfg shape the auto-wirer reads. `no_secrets` adds the sec-1
+    `[security].repo_has_no_secrets` opt-in block."""
+    cfg = {
         "agents": {
             "oyakata": {
                 "permissions": {"enabled": enabled},
             },
         },
     }
+    if no_secrets:
+        cfg["security"] = {"repo_has_no_secrets": True}
+    return cfg
 
 
 def _make_fake_orchestrator(tmp_path) -> pathlib.Path:
@@ -113,6 +117,68 @@ class TestCreation:
         oyakata.auto_wire_pretooluse_hook(_cfg(True), str(project), str(musubi))
         after = set(p.name for p in project.iterdir())
         assert after - before == {".claude"}
+
+
+# ---------------------------------------------------------------------------
+# sec-1 Slice 2 — [security].repo_has_no_secrets disclose-tier opt-in
+# ---------------------------------------------------------------------------
+
+class TestDiscloseOptIn:
+    def _command(self, project) -> str:
+        data = json.loads(_settings_path(project).read_text())
+        return data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+    @pytest.mark.parametrize("cfg, expected", [
+        ({}, False),
+        ({"security": {}}, False),
+        ({"security": {"repo_has_no_secrets": False}}, False),
+        ({"security": {"repo_has_no_secrets": True}}, True),
+        ({"security": "not-a-dict"}, False),
+    ])
+    def test_repo_has_no_secrets_helper(self, cfg, expected):
+        assert oyakata.repo_has_no_secrets(cfg) is expected
+
+    def test_default_command_is_bare_path(self, tmp_path):
+        """No [security] block → command is the bare hook path, byte-identical
+        to the pre-sec-1 entry (no env wrapper)."""
+        project = _make_project(tmp_path)
+        musubi = _make_fake_orchestrator(tmp_path)
+        oyakata.auto_wire_pretooluse_hook(_cfg(True), str(project), str(musubi))
+        cmd = self._command(project)
+        assert "MUSUBI_REPO_HAS_NO_SECRETS" not in cmd
+        assert "/usr/bin/env" not in cmd
+        assert cmd.endswith("scripts/oya-pretooluse.py")
+
+    def test_opt_in_wraps_command_with_env(self, tmp_path):
+        """repo_has_no_secrets=true → command is wrapped in /usr/bin/env so the
+        hook runs with MUSUBI_REPO_HAS_NO_SECRETS=1, and stays an absolute path
+        for the auto-wirer's checks."""
+        project = _make_project(tmp_path)
+        musubi = _make_fake_orchestrator(tmp_path)
+        oyakata.auto_wire_pretooluse_hook(_cfg(True, no_secrets=True), str(project), str(musubi))
+        cmd = self._command(project)
+        assert cmd.startswith("/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 ")
+        assert cmd.endswith("scripts/oya-pretooluse.py")
+        assert os.path.isabs(cmd)
+
+    def test_flipping_flag_rewrites_single_entry(self, tmp_path):
+        """Turning the opt-in on after an off launch updates the existing entry
+        in place (verdict 'updated') — not a second duplicate hook."""
+        project = _make_project(tmp_path)
+        musubi = _make_fake_orchestrator(tmp_path)
+        oyakata.auto_wire_pretooluse_hook(_cfg(True), str(project), str(musubi))
+        assert "MUSUBI_REPO_HAS_NO_SECRETS" not in self._command(project)
+        oyakata.auto_wire_pretooluse_hook(_cfg(True, no_secrets=True), str(project), str(musubi))
+        # Exactly one entry, now wrapped.
+        data = json.loads(_settings_path(project).read_text())
+        pre = data["hooks"]["PreToolUse"]
+        assert len(pre) == 1
+        assert self._command(project).startswith("/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 ")
+        # And flipping back off restores the bare path, still one entry.
+        oyakata.auto_wire_pretooluse_hook(_cfg(True), str(project), str(musubi))
+        data = json.loads(_settings_path(project).read_text())
+        assert len(data["hooks"]["PreToolUse"]) == 1
+        assert "MUSUBI_REPO_HAS_NO_SECRETS" not in self._command(project)
 
 
 # ---------------------------------------------------------------------------

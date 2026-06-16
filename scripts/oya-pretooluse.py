@@ -3,10 +3,13 @@
 
 Two tiers:
 
-  Tier 1 — Static allowlist (slices 1 + 2). Read-only ops (`Read`, `Grep`,
-    `Glob`, `NotebookRead`) and a narrow Bash subset (`git status|log|diff|
-    show|branch|...`, `pwd`, `ls`, `cat`, …) are auto-approved without
-    consulting anyone. Any shell metachar in the Bash command defers.
+  Tier 1 — Static allowlist (slices 1 + 2; hardened by sec-1 2026-06-16).
+    Read-only ops (`Read`, `Grep`, `Glob`, `NotebookRead`) and a narrow
+    METADATA-ONLY Bash subset (`git status|branch|rev-parse|ls-files`, `pwd`,
+    `ls`, `stat`, …) are auto-approved. Content/config-disclosing reads
+    (`git show|diff|log`, `git config`, `git remote`) DEFER by default — they
+    leak secrets — and re-enable only under `[security].repo_has_no_secrets`.
+    Any shell metachar OR `$` expansion in the Bash command defers.
 
   Tier 2 — Oya-as-decider (slice 3, this file). When a tool call IS NOT in
     tier-1 but IS plausibly in-context (an `Edit`/`Write`/`NotebookEdit`
@@ -54,31 +57,37 @@ UNCONDITIONAL_TOOLS = frozenset({
     "NotebookRead",
 })
 
-# Bash commands considered safely read-only. Each pattern matches the WHOLE
-# command string from the start. The command-head pattern must be paired with
-# the no-shell-metachars check below — a head match alone is not enough,
-# because `git status | tee statefile.txt` still mutates state.
+# Bash commands are split into two tiers by DISCLOSURE risk, not just by whether
+# they mutate state. The audit (sec-1, 2026-06-16) showed that "non-mutating" is
+# not the same as "safe to auto-approve": a read can still leak secrets. Each
+# pattern matches the WHOLE command from the start and must be paired with the
+# no-shell-metachar + no-`$`-expansion fence below — a head match alone is not
+# enough, because `git status | tee statefile.txt` still mutates state.
+#
+#   METADATA_SAFE — reveal only metadata (status, refs, names, file stats).
+#     Always auto-approved.
+#   DISCLOSE      — reveal file CONTENT or config/credentials (git show/diff/log,
+#     git config, git remote, git blame). Deferred BY DEFAULT; auto-approved only
+#     when the operator has explicitly opted in (env flag below, set from
+#     `[security].repo_has_no_secrets`). Default-off so the safe default never
+#     leaks.
 #
 # Conservative by design. If you can't tell at a glance whether a pattern is
-# read-only, leave it off this list. The cost of a false-negative (extra
-# permission prompt) is zero; the cost of a false-positive (auto-approved
-# state change) is trust loss.
-SAFE_BASH_PATTERNS = tuple(
+# metadata-only, put it in DISCLOSE (or leave it off entirely). The cost of a
+# false-negative (extra prompt) is zero; the cost of a false-positive
+# (auto-approved disclosure) is silent secret leakage + trust loss.
+METADATA_SAFE_PATTERNS = tuple(
     re.compile(p) for p in (
-        # git read-only operations
+        # git — metadata only (status, refs, names, tracking). No file content.
         r"^git\s+status(\s|$)",
-        r"^git\s+log(\s|$)",
-        r"^git\s+diff(\s|$)",
-        r"^git\s+show(\s|$)",
         r"^git\s+branch(\s+(-l|--list|-a|-r|-v))*\s*$",
         r"^git\s+rev-parse(\s|$)",
-        r"^git\s+config\s+--get(\s|$)",
-        r"^git\s+config\s+--list(\s|$)",
-        r"^git\s+remote(\s+(-v|--verbose))?\s*$",
         r"^git\s+ls-files(\s|$)",
         r"^git\s+ls-tree(\s|$)",
-        r"^git\s+blame(\s|$)",
-        # filesystem read-only (metadata only)
+        # git log ONLY in the --oneline summary form (subjects, not patches).
+        # General `git log` is in DISCLOSE — `git log -p`/`-G`/`-S` show content.
+        r"^git\s+log\s+--oneline(\s+-n\s+\d+|\s+-\d+)?\s*$",
+        # filesystem — metadata only (paths, sizes, types). No content.
         r"^pwd\s*$",
         r"^whoami\s*$",
         r"^date(\s|$)",
@@ -90,17 +99,39 @@ SAFE_BASH_PATTERNS = tuple(
         r"^which\s+\S",
         r"^command\s+-v\s+\S",
         r"^type\s+\S",
-        r"^echo(\s|$)",
     )
 )
-# DELIBERATELY NOT auto-approved (were in earlier revisions, removed for safety):
-#   cat / head / tail  — disclose arbitrary file *contents* (`cat ~/.ssh/id_rsa`,
-#                        `cat .env`). Normal file reads route through the Read
-#                        tool, which Claude Code path-scopes; there is no benign
-#                        reason to auto-approve raw `cat` of an arbitrary path.
-#   printenv / env     — dump the environment, including any exported API keys.
-# The cost of deferring these is one permission prompt; the cost of
-# auto-approving them is silent secret disclosure. Defer wins.
+
+# Reveal file CONTENT or config/credentials. Deferred unless the operator opts in.
+DISCLOSE_PATTERNS = tuple(
+    re.compile(p) for p in (
+        r"^git\s+show(\s|$)",                      # `git show HEAD:.env` → tracked secret
+        r"^git\s+diff(\s|$)",                      # working-tree / staged content
+        r"^git\s+log(\s|$)",                       # general log incl. -p/-G/-S patch output
+        r"^git\s+blame(\s|$)",                     # prints file content lines
+        r"^git\s+config\s+--get(\s|$)",            # may read http.extraheader / tokens
+        r"^git\s+config\s+--list(\s|$)",           # dumps all config incl. credentials
+        r"^git\s+remote(\s+(-v|--verbose))?\s*$",  # URLs may embed user:token@host
+    )
+)
+# DELIBERATELY NOT auto-approved at all (no opt-in re-enables these):
+#   cat / head / tail  — disclose arbitrary file *contents* at any path
+#                        (`cat ~/.ssh/id_rsa`, `cat .env`). Normal reads route
+#                        through the path-scoped Read tool.
+#   printenv / env     — dump the environment, including exported API keys.
+#   echo               — removed (was auto-approved): near-zero benefit and the
+#                        cleanest env-expansion vector (`echo $TOKEN`). With `$`
+#                        now fenced it would be inert anyway, but it earns nothing.
+
+
+def _disclosure_opt_in() -> bool:
+    """True when the operator has declared the repo holds no secrets worth
+    protecting from a read — `[security].repo_has_no_secrets`, surfaced to the
+    hook as MUSUBI_REPO_HAS_NO_SECRETS. Default False: the safe default never
+    auto-approves a content/config disclosure."""
+    return os.environ.get("MUSUBI_REPO_HAS_NO_SECRETS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 # Any of these in the command means "DON'T auto-approve, defer." The shell
 # metacharacters that compose commands or redirect output. If any of them
@@ -110,18 +141,24 @@ SAFE_BASH_PATTERNS = tuple(
 # cost is zero (operator just answers the prompt manually) and the safety
 # margin is large.
 #
-# `\n` and `\r` are in this list because the SAFE_BASH_PATTERNS anchor only at
+# `\n` and `\r` are in this list because the allowlist patterns anchor only at
 # the START of the string (`re.match`). Without the newline fence, a command
 # whose first line is allow-listed would auto-approve a SECOND line carrying an
 # arbitrary payload — e.g. "git status\nrm -rf /" matches `^git\s+status` and
 # would run the rm. Claude Code passes a multi-line command to one shell, so the
 # whole payload executes. Treat any newline as a command separator and defer.
+# `$` (bare) is fenced because ANY expansion can disclose a secret without a
+# pipe or subshell: `echo $TOKEN`, `ls $HOME`, `git show $REF` all let the shell
+# substitute an env var / path the allowlist never saw. This subsumes `$(` and
+# `$((` (kept below for explicitness). Cost: a read-only command containing a
+# literal `$` defers to a prompt — cheap; the leak it prevents is not.
 DANGEROUS_SHELL_TOKENS = (
     "|",
     ">",
     "<",
     ";",
     "&",
+    "$",
     "$(",
     "`",
     "$((",
@@ -135,10 +172,21 @@ DANGEROUS_SHELL_TOKENS = (
 def classify_bash(command: str) -> tuple[bool, str]:
     """Return (auto_approve, reason). Reason is operator-readable."""
     if any(tok in command for tok in DANGEROUS_SHELL_TOKENS):
-        return False, "contains shell metacharacter (chain/pipe/redirect)"
-    for pattern in SAFE_BASH_PATTERNS:
+        return False, "contains shell metacharacter (chain/pipe/redirect/expansion)"
+    for pattern in METADATA_SAFE_PATTERNS:
         if pattern.match(command):
-            return True, f"matches tier-1 read-only pattern: {pattern.pattern}"
+            return True, f"matches tier-1 metadata-only pattern: {pattern.pattern}"
+    for pattern in DISCLOSE_PATTERNS:
+        if pattern.match(command):
+            if _disclosure_opt_in():
+                return True, (
+                    "matches content/config pattern; disclosure opt-in enabled "
+                    f"([security].repo_has_no_secrets): {pattern.pattern}"
+                )
+            return False, (
+                "discloses file content or config; deferred by default "
+                f"(set [security].repo_has_no_secrets to opt in): {pattern.pattern}"
+            )
     return False, "no tier-1 read-only pattern matched"
 
 

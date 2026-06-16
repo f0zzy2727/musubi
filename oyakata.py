@@ -42,6 +42,19 @@ def oyakata_permissions_enabled(cfg):
     )
 
 
+def repo_has_no_secrets(cfg):
+    """True when the operator declared, via `[security].repo_has_no_secrets`,
+    that this repo holds nothing worth protecting from a read — re-enabling
+    auto-approval of the PreToolUse hook's content/config disclose tier
+    (`git show`/`diff`/`log`/`config`/`remote`; sec-1). Default False: the safe
+    default never auto-approves a disclosure. Bare-`$` expansion and `cat`/
+    `printenv` are never re-enabled by this flag (enforced hook-side)."""
+    sec = cfg.get("security")
+    if not isinstance(sec, dict):
+        return False
+    return bool(sec.get("repo_has_no_secrets", False))
+
+
 def operator_actions_enabled(cfg):
     """True when Oya is enabled AND the operator-action surface is on.
 
@@ -597,14 +610,28 @@ def _resolve_hook_command(orchestrator_dir=None):
     return os.path.join(orchestrator_dir, "scripts", "oya-pretooluse.py")
 
 
-def _build_hook_entry(command_path):
-    """Shape the JSON object Claude Code expects in the PreToolUse array."""
+def _build_hook_entry(command_path, repo_has_no_secrets=False):
+    """Shape the JSON object Claude Code expects in the PreToolUse array.
+
+    When `repo_has_no_secrets` is set, the command is wrapped in
+    `/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 <path>` so the hook's disclose-
+    tier opt-in (sec-1) is active for the agents that run it. `/usr/bin/env`
+    (not a bare `VAR=1 cmd` shell prefix) is used deliberately: it works
+    whether Claude Code execs the command as an argv vector or via a shell,
+    and the entry stays an absolute path so the auto-wirer's `isabs` check and
+    the `oya-pretooluse.py` marker substring both still hold. When the flag is
+    off, the command is the bare path — byte-identical to the pre-sec-1 entry.
+    """
+    if repo_has_no_secrets:
+        command = f"/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 {command_path}"
+    else:
+        command = command_path
     return {
         "matcher": PRETOOLUSE_HOOK_MATCHER,
         "hooks": [
             {
                 "type": "command",
-                "command": command_path,
+                "command": command,
                 "timeout": PRETOOLUSE_HOOK_TIMEOUT,
             }
         ],
@@ -631,7 +658,7 @@ def _entry_marks_oya_hook(entry):
     return False
 
 
-def _merge_hook_into_settings(settings, command_path):
+def _merge_hook_into_settings(settings, command_path, repo_has_no_secrets=False):
     """Mutate `settings` (a parsed JSON dict) to include the oya-pretooluse
     hook entry. Returns one of:
       - 'created' — fresh entry appended (no prior musubi entry detected)
@@ -650,7 +677,7 @@ def _merge_hook_into_settings(settings, command_path):
     if not isinstance(pre_list, list):
         return "malformed"
 
-    new_entry = _build_hook_entry(command_path)
+    new_entry = _build_hook_entry(command_path, repo_has_no_secrets)
 
     for i, entry in enumerate(pre_list):
         if _entry_marks_oya_hook(entry):
@@ -696,6 +723,16 @@ def auto_wire_pretooluse_hook(cfg, project_path, orchestrator_dir=None):
         )
         return
 
+    disclose_opt_in = repo_has_no_secrets(cfg)
+    if disclose_opt_in:
+        _log(
+            "PERMS",
+            "[security].repo_has_no_secrets = true — PreToolUse hook will "
+            "auto-approve content/config-disclosing reads (git show/diff/log/"
+            "config/remote). Confirm this repo holds no secrets (no tracked "
+            ".env, no credential-bearing config/remotes).",
+        )
+
     claude_dir = os.path.join(project_path, ".claude")
     settings_path = os.path.join(claude_dir, "settings.local.json")
 
@@ -729,7 +766,7 @@ def auto_wire_pretooluse_hook(cfg, project_path, orchestrator_dir=None):
         settings = {}
         existed = False
 
-    verdict = _merge_hook_into_settings(settings, command_path)
+    verdict = _merge_hook_into_settings(settings, command_path, disclose_opt_in)
 
     if verdict == "unchanged":
         # File already contains the exact entry we'd write. Skip disk I/O.
