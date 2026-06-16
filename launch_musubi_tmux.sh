@@ -30,6 +30,19 @@
 
 set -euo pipefail
 
+# --- Native Windows guard (Git Bash / MSYS / Cygwin) ---
+# Musubi's runtime is tmux + libtmux, which don't run on native Windows. WSL
+# reports as 'Linux' (uname) and works unchanged; this only trips Git Bash /
+# MSYS / Cygwin shells, where a launch would fail deep in the relay.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "musubi: native Windows is not supported (the runtime is tmux + libtmux)." >&2
+    echo "        Run musubi under WSL2 instead: install WSL, clone the repo inside" >&2
+    echo "        your Linux home, and launch from the WSL shell. See the README." >&2
+    exit 2
+    ;;
+esac
+
 # --- Parse flags ---
 POSITIONAL=()
 for arg in "$@"; do

@@ -2326,6 +2326,21 @@ def attach_to_musubi(config_path="musubi.toml", session_override=None):
 
 
 if __name__ == "__main__":
+    # Fail fast on native Windows. Musubi's runtime is tmux + libtmux, which
+    # do not run on native Windows (cmd/PowerShell); a launch there fails deep
+    # inside the relay with confusing errors that read like portability bugs.
+    # Windows is out of scope by design — run under WSL2, where the Linux path
+    # works unchanged. (WSL reports as 'linux', so this only trips native Win.)
+    if sys.platform.startswith("win"):
+        print(
+            "musubi: native Windows is not supported (the runtime is tmux + "
+            "libtmux). Run musubi under WSL2 instead — install WSL, clone the "
+            "repo inside your Linux home, and launch from the WSL shell. "
+            "See the Prerequisites section of the README.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     import argparse
     parser = argparse.ArgumentParser(description="Musubi orchestrator: launch or re-attach the agent relay.")
     parser.add_argument("config", nargs="?", default="musubi.toml", help="Path to musubi.toml (default: musubi.toml)")

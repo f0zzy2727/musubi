@@ -38,6 +38,19 @@ That's the pair — musubi's default and most battle-tested shape. It can also r
 
 ---
 
+## When musubi fits — and when it's overkill
+
+Musubi is built for work where a *missed* defect costs more than the tokens to catch it: production code, long multi-file changes, security- or money-touching paths, migrations, anything where two unlike models disagreeing earns its keep. The ceremony — durable artifacts, the rules ledger, Oya — is priced for that risk.
+
+**It is not for small, low-risk work.** A docs edit, an obvious bug fix, a formatting pass, an isolated test — a single Codex (or Claude) pass plus tests is faster, and the protocol is overhead you don't need. You *can* run musubi on small work, but then you don't need the third agent and its overhead; reach for the lighter shape instead. The honest rule of thumb:
+
+- **Small / one-off / low blast-radius** → solo, or the **pair only** with the [Tiny lane](#slice-lanes--ceremony-that-scales-with-risk). No Oya.
+- **Sustained build, real stakes, judgement easy to get wrong** → the **pair + Oya**, full ceremony.
+
+The framework is designed to be **light by default and scale ceremony with risk** ([slice lanes](#slice-lanes--ceremony-that-scales-with-risk) classify each piece of work; [Oya](#the-third-agent--oya-optional) is opt-in). If musubi feels like too much process for what you're doing, that's the signal to drop a shape, not to fight the protocol.
+
+---
+
 ## The third agent — Oya (optional)
 
 Musubi runs in two shapes, and the difference is **who plays the senior engineer**.
@@ -154,6 +167,8 @@ musubi/
 | GitHub CLI (optional, for `ci-baseline.sh`) | Latest | `brew install gh` |
 
 Both Claude Code and Codex must be authenticated and working in your terminal before running musubi. Test them independently first.
+
+**Platform.** macOS and Linux are supported; on Windows, run musubi under **WSL2** (it reports as Linux and works unchanged). Native Windows — cmd, PowerShell, or Git Bash — is **out of scope**: the runtime is tmux + libtmux, which don't run there. The launcher and orchestrator fail fast with a "use WSL" message rather than breaking deep in the relay.
 
 ---
 
