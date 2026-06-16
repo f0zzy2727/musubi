@@ -6,7 +6,63 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **PreToolUse allowlist no longer auto-approves secret-disclosing reads
+  (`sec-1`).** An external audit found the oyakata-2 hook equated "non-mutating"
+  with "safe to auto-approve": it still auto-approved `echo $TOKEN` (bare `$`
+  was never fenced, so the shell expanded it), `git show HEAD:.env` (prints a
+  tracked secret — the exact thing removing `cat` was meant to prevent),
+  `git diff`, `git config --list`, and `git remote -v`. The allowlist is now
+  split by disclosure risk: metadata-only commands (`git status`/`branch`/
+  `rev-parse`/`ls-files`, `git log --oneline`, `pwd`/`ls`/`stat`/…) auto-approve;
+  content/config-disclosing reads defer by default and re-enable only under a
+  new `[security].repo_has_no_secrets` opt-in. Bare `$` expansion is fenced and
+  `echo` is removed. Wiring quotes the hook path so a checkout location with a
+  space stays one argument. The disclose opt-in logs a loud warning each launch.
+
+### Added
+
+- **`pyproject.toml` + a `musubi` console script (`pkg-1`).**
+  `pip install -e '.[dev]'` builds the package and installs a `musubi` command;
+  `orchestrator.py`'s entry point is now a `main()` returning an exit code.
+- **A reproducible metric artifact (`pkg-1`).** `scripts/comms-metrics.py` JSON
+  output is now demonstrated by a committed fixture comms thread
+  (`tests/fixtures/comms-sample/`) and its deterministic artifact
+  (`docs/positioning/benchmarks/artifacts/sample-metrics.json`), pinned by a
+  test so the numbers stay reproducible from committed data. A README documents
+  the reproduce command, the schema, and the honest scope (private-corpus
+  headline numbers are not reproducible from the repo).
+
+### Changed
+
+- **Positioning: README now states up front when musubi fits — and when it's
+  overkill (`scope-1`).** A new section makes the boundary explicit: musubi is
+  for work where a missed defect costs more than the tokens; small/low-risk
+  work is solo or pair-only (no third agent). Light by default, ceremony scales
+  with risk.
+- **Native Windows fails fast with a "use WSL2" message (`scope-1`).** The
+  runtime is tmux + libtmux; `orchestrator.py` and `launch_musubi_tmux.sh` now
+  exit cleanly on native Windows instead of breaking deep in the relay. Windows
+  is documented as out of scope (use WSL2).
+- **Debug bundles are private by default (`priv-1`).**
+  `scripts/collect-debug-bundle.sh` no longer collects Claude/Codex transcripts
+  unless `-T` is passed; when it is, a best-effort secret-redaction pass
+  (`scripts/redact-bundle.py`) runs before zipping, and the MANIFEST declares
+  which sensitive classes the bundle contains. **Behaviour change:** callers
+  relying on default-in transcripts must now pass `-T`.
+- **Operator console input prompt is now visible (`ux-1`).** The `YOU →` prompt
+  is rendered bold/cyan so the operator can tell where they type.
+
 ### Fixed
+
+- **Oya's scoped `settings.local.json` is written via a JSON helper, not a
+  heredoc (`robust-1`).** `scripts/write-oya-settings.py` renders the file with
+  `json.dump`, so a project path containing a quote, backslash, or `$` can no
+  longer corrupt it (and it stops violating the repo's own no-heredoc rule).
+- **Oya pane discovery uses a separator-aware path match** so a sibling clone
+  (`<root>.bak/…`) can't be mistaken for the active checkout's Oya pane.
+
 
 - **The relay no longer floods Oya with a whole cycle's old messages after a
   comms-file shrink.** Field report from a second operator (Oya herself

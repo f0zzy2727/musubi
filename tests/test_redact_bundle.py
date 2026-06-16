@@ -90,3 +90,15 @@ class TestMain:
 
     def test_wrong_args_return_2(self):
         assert redact_bundle.main(["prog"]) == 2
+
+    def test_non_utf8_bytes_preserved_around_redaction(self, tmp_path):
+        """A text-extension file with invalid UTF-8 bytes must not be corrupted:
+        the secret is redacted, the raw bytes round-trip (surrogateescape)."""
+        f = tmp_path / "t.txt"
+        raw = b"prefix \xff\xfe bytes token=ZYXW9876543210abcd tail \x80\x81"
+        f.write_bytes(raw)
+        redact_bundle.main(["prog", str(tmp_path)])
+        out = f.read_bytes()
+        assert b"ZYXW9876543210abcd" not in out      # secret gone
+        assert b"[REDACTED]" in out
+        assert b"\xff\xfe" in out and b"\x80\x81" in out  # raw bytes preserved

@@ -158,8 +158,26 @@ class TestDiscloseOptIn:
         oyakata.auto_wire_pretooluse_hook(_cfg(True, no_secrets=True), str(project), str(musubi))
         cmd = self._command(project)
         assert cmd.startswith("/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 ")
-        assert cmd.endswith("scripts/oya-pretooluse.py")
+        # The hook path is double-quoted so a checkout location with a space
+        # can't split the wrapped command into the wrong args.
+        assert cmd.endswith('scripts/oya-pretooluse.py"')
+        assert '"' in cmd
         assert os.path.isabs(cmd)
+
+    def test_opt_in_path_with_space_is_quoted(self, tmp_path):
+        """A musubi checkout location containing a space must stay a single
+        quoted argument in the wrapped command, not split into two."""
+        musubi = tmp_path / "My Projects" / "musubi"
+        (musubi / "scripts").mkdir(parents=True)
+        (musubi / "scripts" / "oya-pretooluse.py").write_text("#!/usr/bin/env python3\n")
+        project = _make_project(tmp_path)
+        oyakata.auto_wire_pretooluse_hook(_cfg(True, no_secrets=True), str(project), str(musubi))
+        cmd = self._command(project)
+        # The whole path (with its space) sits inside one pair of quotes.
+        assert '"' in cmd
+        quoted = cmd.split('"', 1)[1].rsplit('"', 1)[0]
+        assert quoted.endswith("scripts/oya-pretooluse.py")
+        assert "My Projects" in quoted
 
     def test_flipping_flag_rewrites_single_entry(self, tmp_path):
         """Turning the opt-in on after an off launch updates the existing entry

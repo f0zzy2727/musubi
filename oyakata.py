@@ -274,7 +274,10 @@ def discover_oyakata_pane(session, cfg):
         for pane in session.active_window.panes:
             out = pane.cmd("display-message", "-p", "#{pane_current_path}").stdout
             path = (out[0] if out else "") or ""
-            if path.startswith(musubi_root):
+            # Separator-aware prefix match: a bare startswith would also match a
+            # sibling clone like `<root>.bak/docs/...`. Oya's cwd is always a
+            # subdir of the root (attach-oya.sh sets it to <root>/docs/operator).
+            if path == musubi_root or path.startswith(musubi_root + os.sep):
                 return pane
     except Exception:
         pass
@@ -614,16 +617,20 @@ def _build_hook_entry(command_path, repo_has_no_secrets=False):
     """Shape the JSON object Claude Code expects in the PreToolUse array.
 
     When `repo_has_no_secrets` is set, the command is wrapped in
-    `/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 <path>` so the hook's disclose-
+    `/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 "<path>"` so the hook's disclose-
     tier opt-in (sec-1) is active for the agents that run it. `/usr/bin/env`
     (not a bare `VAR=1 cmd` shell prefix) is used deliberately: it works
     whether Claude Code execs the command as an argv vector or via a shell,
     and the entry stays an absolute path so the auto-wirer's `isabs` check and
-    the `oya-pretooluse.py` marker substring both still hold. When the flag is
-    off, the command is the bare path — byte-identical to the pre-sec-1 entry.
+    the `oya-pretooluse.py` marker substring both still hold. The path is
+    double-quoted so a musubi checkout location containing a space (e.g.
+    `~/My Projects/musubi`) can't split the wrapped command into the wrong
+    args — quotes are respected under both shell and shlex/argv execution.
+    When the flag is off, the command is the bare path — byte-identical to the
+    pre-sec-1 entry (the bare-path-with-spaces case is unchanged from before).
     """
     if repo_has_no_secrets:
-        command = f"/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 {command_path}"
+        command = f'/usr/bin/env MUSUBI_REPO_HAS_NO_SECRETS=1 "{command_path}"'
     else:
         command = command_path
     return {

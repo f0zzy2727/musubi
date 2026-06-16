@@ -77,14 +77,17 @@ def main(argv: list[str]) -> int:
             try:
                 if os.path.getsize(p) > MAX_BYTES:
                     continue
-                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                # surrogateescape (not "replace") so any non-UTF-8 bytes in an
+                # untouched region round-trip back to their original bytes on
+                # write — a file we only partially redact is never corrupted.
+                with open(p, "r", encoding="utf-8", errors="surrogateescape") as f:
                     original = f.read()
             except OSError:
                 continue
             new, n = redact_text(original)
             if n:
                 try:
-                    with open(p, "w", encoding="utf-8") as f:
+                    with open(p, "w", encoding="utf-8", errors="surrogateescape") as f:
                         f.write(new)
                     files_touched += 1
                     redactions += n
