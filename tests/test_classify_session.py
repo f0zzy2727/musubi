@@ -126,6 +126,21 @@ class TestClassifyPairOnly:
         ])
         assert classify_existing_session(session) == "orphan"
 
+    def test_both_shells_at_repo_root_is_orphan(self):
+        # Reboot / Ctrl+C'd-launch regression: dropped-to-shell panes default
+        # to the musubi repo-root cwd, which the Oya-pane cwd heuristic would
+        # otherwise mistake for Oya panes — flagging every pane as Oya, leaving
+        # zero pair panes, and spuriously prompting the operator. All-shell is
+        # an unambiguous corpse and must classify as orphan (silent recreate).
+        # Repo root = where orchestrator.py lives = the classifier's
+        # musubi_root_path. MUSUBI_ROOT is that + "/docs/operator".
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        session = make_session([
+            make_pane("%0", "zsh", current_path=repo_root),
+            make_pane("%1", "zsh", current_path=repo_root),
+        ])
+        assert classify_existing_session(session) == "orphan"
+
     def test_one_alive_one_shell_is_ambiguous(self):
         session = make_session([
             make_pane("%0", "claude"),

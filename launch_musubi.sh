@@ -150,18 +150,26 @@ echo "Environment ready."
 # --- Spawn ONE iTerm window for the tmux attach (visual pane interaction).
 # The orchestrator runs in THIS terminal so you see its log stream live and
 # can hit Enter at any gate to skip the wait.
+#
+# The window runs scripts/attach-session.sh, which waits for the session, then
+# attaches and RE-ATTACHES if the orchestrator's orphan-cleanup path kills and
+# recreates the session under the same name (field bug 2026-06-22: a one-shot
+# `sleep 4 && tmux attach` attached to the old corpse, got booted on cleanup,
+# and left the fresh session with no client — stalling the launch). See that
+# script for the full rationale.
+ATTACH_SCRIPT="$ORCHESTRATOR_DIR/scripts/attach-session.sh"
 osascript <<EOF
 tell application "iTerm2"
     activate
     create window with default profile
     tell current session of current window
-        write text "sleep 4 && tmux attach -t ${SESSION}"
+        write text "${ATTACH_SCRIPT} ${SESSION}"
     end tell
 end tell
 EOF
 
 echo ""
-echo "iTerm window opened (will tmux attach in 4s)."
+echo "iTerm window opened (waiting for the tmux session, then attaching)."
 echo "Orchestrator starting in THIS terminal — watch the [HH:MM:SS] [COMPONENT] stream."
 echo "Ctrl+C here to stop the watcher; iTerm window stays for inspection."
 echo ""

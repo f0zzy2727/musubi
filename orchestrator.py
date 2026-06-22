@@ -894,6 +894,16 @@ def classify_existing_session(session):
     if len(panes) < 2:
         return "ambiguous"
 
+    # All panes are shells → unambiguous corpse, regardless of layout or cwd.
+    # This MUST precede Oya-pane detection: after a reboot (or a Ctrl+C'd
+    # launch) the dropped-to-shell panes default to the repo-root cwd, which
+    # the cwd-based `_is_oya_pane` heuristic below would mistake for the Oya
+    # pane — flagging every pane as Oya, leaving zero pair panes, and
+    # misclassifying a plain corpse as 'ambiguous' (spurious operator prompt).
+    # No agent CLI is running in any pane, so there is no live work to lose.
+    if all(pane_in_shell(p) for p in panes):
+        return "orphan"
+
     musubi_root_path = os.path.dirname(os.path.abspath(__file__))
 
     def _is_oya_pane(p):
