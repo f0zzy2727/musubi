@@ -42,6 +42,7 @@ jobs:
           bash -n scripts/ci-baseline.sh
           bash -n scripts/attach-oya.sh
           bash -n scripts/cwd-preflight.sh
+          bash -n scripts/env-preflight.sh
           bash -n scripts/classify-slice.sh
           bash -n scripts/doctor.sh
           # launch_musubi.sh is zsh (macOS-default-shell launcher) and is
@@ -50,7 +51,7 @@ jobs:
 
       - name: Shellcheck
         run: |
-          shellcheck bootstrap.sh launch_musubi_tmux.sh scripts/guard-staged-scope.sh scripts/ci-baseline.sh scripts/attach-oya.sh scripts/cwd-preflight.sh scripts/classify-slice.sh scripts/doctor.sh scripts/operator-console.sh scripts/pick-config.sh
+          shellcheck bootstrap.sh launch_musubi_tmux.sh scripts/guard-staged-scope.sh scripts/ci-baseline.sh scripts/attach-oya.sh scripts/cwd-preflight.sh scripts/env-preflight.sh scripts/classify-slice.sh scripts/doctor.sh scripts/operator-console.sh scripts/pick-config.sh
 
       - name: Run tests
         run: pytest tests/ -v

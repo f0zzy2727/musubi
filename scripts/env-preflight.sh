@@ -73,7 +73,10 @@ load_project_env() {
     # Args: project_path orchestrator_dir
     project_path="$1"
     orchestrator_dir="$2"
-    # Expand a leading ~ in the project path.
+    # Expand a leading ~ in the project path. We MATCH a literal "~/" prefix in
+    # the config string and expand it ourselves via $HOME — we are not relying on
+    # shell tilde expansion, so SC2088 is a false positive here.
+    # shellcheck disable=SC2088
     case "$project_path" in
         "~") project_path="$HOME" ;;
         "~/"*) project_path="$HOME/${project_path#"~/"}" ;;
