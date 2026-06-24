@@ -97,6 +97,18 @@ _BLOCK_SEP = re.compile(r"^-{10,}\s*$", re.MULTILINE)
 class Rule:
     id: str
     citation_pattern: str
+    # Optional widening of the fire-detection match (added 2026-06-22 to fix the
+    # "fire-counter under-counts" finding — the single literal citation_pattern
+    # missed the paraphrases agents actually type, reporting zero fires for rules
+    # that demonstrably fired every cycle). Both are OPT-IN and backward-compatible:
+    # a rule with only citation_pattern matches exactly as before.
+    #   citation_aliases — extra literal substrings; any one counts as a fire
+    #                      (e.g. ["capsule is stale", "old capsule"] for a
+    #                      "capsule-staleness" rule).
+    #   citation_regex   — a real (un-escaped) regex; use for word-boundary or
+    #                      alternation matching the literals can't express.
+    citation_aliases: list = field(default_factory=list)
+    citation_regex: str = ""
 
 
 @dataclass
@@ -125,7 +137,15 @@ def load_rules(ledger_path):
         rid = entry.get("id")
         pattern = entry.get("citation_pattern")
         if rid and pattern:
-            rules.append(Rule(id=rid, citation_pattern=pattern))
+            aliases = entry.get("citation_aliases") or []
+            if isinstance(aliases, str):  # tolerate a single string in YAML
+                aliases = [aliases]
+            rules.append(Rule(
+                id=rid,
+                citation_pattern=pattern,
+                citation_aliases=[a for a in aliases if a],
+                citation_regex=entry.get("citation_regex") or "",
+            ))
     return rules
 
 
@@ -152,14 +172,30 @@ def split_messages(text):
     return [b for b in _BLOCK_SEP.split(text) if b.strip()]
 
 
+def build_matcher(rule):
+    """Compile a single case-insensitive matcher for a rule that fires on the
+    literal citation_pattern OR any citation_alias OR the optional citation_regex.
+    Literals are re.escape'd (matched verbatim); citation_regex is used raw. A
+    malformed citation_regex is dropped with a stderr note rather than aborting
+    the scan, so a typo in one rule can't zero out the whole reconstruction."""
+    alternatives = [re.escape(p) for p in [rule.citation_pattern, *rule.citation_aliases] if p]
+    if rule.citation_regex:
+        try:
+            re.compile(rule.citation_regex)  # validate before trusting it raw
+            alternatives.append(rule.citation_regex)
+        except re.error as e:
+            print(f"  (rule {rule.id}: ignoring invalid citation_regex "
+                  f"{rule.citation_regex!r}: {e})", file=sys.stderr)
+    return re.compile("|".join(alternatives), re.IGNORECASE)
+
+
 def count_fires(rules, text, cycle, accumulator):
     """For each rule, count the comms message-blocks in `text` that contain
-    its citation_pattern (case-insensitive). Adds to `accumulator`
-    ({rule_id: RuleFire}) in place, attributing to `cycle`."""
+    its citation_pattern / aliases / regex (case-insensitive). Adds to
+    `accumulator` ({rule_id: RuleFire}) in place, attributing to `cycle`."""
     blocks = split_messages(text)
-    # Pre-compile case-insensitive literal matchers once per rule.
-    matchers = {r.id: re.compile(re.escape(r.citation_pattern), re.IGNORECASE)
-                for r in rules}
+    # Pre-compile the (literal + alias + regex) matcher once per rule.
+    matchers = {r.id: build_matcher(r) for r in rules}
     for rule in rules:
         rx = matchers[rule.id]
         hits = sum(1 for block in blocks if rx.search(block))

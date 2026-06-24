@@ -131,6 +131,95 @@ def test_citation_match_is_case_insensitive(ledger_file):
     assert acc["rule-b"].total == 1
 
 
+# --- widened matching: aliases + regex (fire-counter under-count fix) ------
+
+# A rule whose literal citation_pattern is the dashed slug, but agents type
+# paraphrases. Aliases + a regex widen the fire detection.
+LEDGER_WIDENED = """\
+schema_version: 1
+project: test
+rules:
+  - id: capsule-staleness
+    type: guard
+    citation_pattern: "capsule-staleness"
+    citation_aliases:
+      - "capsule is stale"
+      - "stale capsule"
+    citation_regex: "capsule .{0,20}(?:stale|out of date)"
+    fires: { total: 0, by_cycle: {} }
+  - id: literal-only
+    type: discipline
+    citation_pattern: "exact-only-token"
+    fires: { total: 0, by_cycle: {} }
+"""
+
+
+@pytest.fixture
+def widened_ledger(tmp_path):
+    p = tmp_path / "rules-ledger.yml"
+    p.write_text(LEDGER_WIDENED)
+    return p
+
+
+def test_load_rules_reads_aliases_and_regex(widened_ledger):
+    rules = {r.id: r for r in lfc.load_rules(str(widened_ledger))}
+    r = rules["capsule-staleness"]
+    assert r.citation_aliases == ["capsule is stale", "stale capsule"]
+    assert r.citation_regex == "capsule .{0,20}(?:stale|out of date)"
+    # A rule without the new fields defaults cleanly (backward compatible).
+    assert rules["literal-only"].citation_aliases == []
+    assert rules["literal-only"].citation_regex == ""
+
+
+def test_alias_paraphrase_counts_as_fire(widened_ledger):
+    rules = lfc.load_rules(str(widened_ledger))
+    acc = {r.id: lfc.RuleFire(r.id, r.citation_pattern) for r in rules}
+    # Agent never types the dashed slug — uses an alias.
+    text = _msg("@OYA", "the capsule is stale, regenerate before GO")
+    lfc.count_fires(rules, text, "c", acc)
+    assert acc["capsule-staleness"].total == 1
+
+
+def test_regex_paraphrase_counts_as_fire(widened_ledger):
+    rules = lfc.load_rules(str(widened_ledger))
+    acc = {r.id: lfc.RuleFire(r.id, r.citation_pattern) for r in rules}
+    # Matches the regex, not the literal or aliases.
+    text = _msg("@OYA", "that capsule looks out of date to me")
+    lfc.count_fires(rules, text, "c", acc)
+    assert acc["capsule-staleness"].total == 1
+
+
+def test_one_fire_per_block_even_with_multiple_alias_hits(widened_ledger):
+    rules = lfc.load_rules(str(widened_ledger))
+    acc = {r.id: lfc.RuleFire(r.id, r.citation_pattern) for r in rules}
+    text = _msg("@OYA", "capsule is stale AND stale capsule AND capsule-staleness")
+    lfc.count_fires(rules, text, "c", acc)
+    assert acc["capsule-staleness"].total == 1  # per-message, not per-pattern
+
+
+def test_literal_only_rule_unaffected_by_widening(widened_ledger):
+    rules = lfc.load_rules(str(widened_ledger))
+    acc = {r.id: lfc.RuleFire(r.id, r.citation_pattern) for r in rules}
+    text = _msg("@OPUS", "no token here") + _msg("@CODA", "exact-only-token present")
+    lfc.count_fires(rules, text, "c", acc)
+    assert acc["literal-only"].total == 1
+
+
+def test_invalid_regex_is_dropped_not_fatal(tmp_path, capsys):
+    led = tmp_path / "rules-ledger.yml"
+    led.write_text(
+        "schema_version: 1\nrules:\n"
+        '  - id: bad-regex\n    citation_pattern: "anchor"\n'
+        '    citation_regex: "("\n    fires: { total: 0, by_cycle: {} }\n'
+    )
+    rules = lfc.load_rules(str(led))
+    acc = {r.id: lfc.RuleFire(r.id, r.citation_pattern) for r in rules}
+    # The bad regex is ignored; the literal still fires.
+    lfc.count_fires(rules, _msg("@OPUS", "anchor holds"), "c", acc)
+    assert acc["bad-regex"].total == 1
+    assert "ignoring invalid citation_regex" in capsys.readouterr().err
+
+
 # --- write-back: both formats + byte preservation -------------------------
 
 def test_apply_updates_both_flow_and_expanded(ledger_file):

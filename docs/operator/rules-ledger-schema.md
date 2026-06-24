@@ -101,6 +101,15 @@ rules:
     scope: <framework | project>        # framework = from the runbook; project = from CLAUDE.md/CODEX.md
     runbook_section: "<file § section heading path>"
     citation_pattern: "<substring agents type when invoking the rule>"
+    citation_aliases:                   # OPTIONAL — extra literal substrings that also count as a fire.
+      - "<paraphrase agents actually type>"   # use when the canonical slug is rarely typed verbatim.
+    citation_regex: "<optional un-escaped regex>"  # OPTIONAL — for word-boundary / alternation the literals can't express.
+    # Aliases + regex were added 2026-06-22 to fix the fire-counter under-count:
+    # a single literal citation_pattern missed the wording agents really use, so
+    # rules that fired every cycle reported zero. Both fields are opt-in and
+    # backward-compatible — a rule with only citation_pattern behaves as before.
+    # Fires are still counted ONCE per message no matter how many of the
+    # literal/alias/regex alternatives match in that block.
 
     provenance:
       added_in_runbook_version: "<vX.Y>"
