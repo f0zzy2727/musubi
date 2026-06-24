@@ -389,3 +389,101 @@ class TestEndToEnd:
         )
         assert r.returncode == 0
         assert r.stdout == ""
+
+
+# ---------------------------------------------------------------------------
+# Blast-radius gate (blast-1, 2026-06-24)
+# ---------------------------------------------------------------------------
+
+class TestClassifyBlastRadius:
+    """Pure detector: high-blast (expensive/irreversible/fan-out) actions."""
+
+    @pytest.mark.parametrize("cmd", [
+        "rm -rf build/",
+        "rm -fr /tmp/x",
+        "git push origin main --force",
+        "git push -f origin main",
+        "git reset --hard HEAD~3",
+        "git clean -fd",
+        "find . -name '*.tmp' -delete",
+        "DROP TABLE users",
+        "drop database prod",
+        "TRUNCATE TABLE sessions",
+        "DELETE FROM voices",                       # no WHERE → whole-table wipe
+        "terraform destroy",
+        "kubectl delete pod web-1",
+        "docker system prune",
+        "aws s3 rb s3://my-bucket",
+        # the field incident: voice cloning across apps
+        "elevenlabs clone voices --from app-a",
+        "elevenlabs clone voices --all",
+        "for app in a b c; do clone voice $app; done",
+    ])
+    def test_high_blast_flagged(self, cmd):
+        is_blast, reason = oya_pretooluse.classify_blast_radius(cmd)
+        assert is_blast is True, f"{cmd!r} should be high-blast"
+        assert reason
+
+    @pytest.mark.parametrize("cmd", [
+        "ls -la",
+        "git status",
+        "git clone https://github.com/me/repo",     # clone a REPO, not a voice/model
+        "rm notes.txt",                             # single non-recursive delete
+        "DELETE FROM voices WHERE id = 42",         # scoped delete (has WHERE)
+        "npm run build",
+        "cat README.md",
+        "git push origin feature",                  # plain push, no force
+    ])
+    def test_benign_not_flagged(self, cmd):
+        is_blast, reason = oya_pretooluse.classify_blast_radius(cmd)
+        assert is_blast is False, f"{cmd!r} should NOT be high-blast"
+        assert reason is None
+
+    def test_empty_and_nonstring_safe(self):
+        assert oya_pretooluse.classify_blast_radius("") == (False, None)
+        assert oya_pretooluse.classify_blast_radius("   ") == (False, None)
+        assert oya_pretooluse.classify_blast_radius(None) == (False, None)
+
+
+class TestBlastRadiusEndToEnd:
+    def _run(self, tool_name, tool_input, log_path):
+        env = os.environ.copy()
+        env["OYAKATA_DECISIONS_LOG"] = str(log_path)
+        return subprocess.run(
+            [sys.executable, str(HOOK_PATH)],
+            input=json.dumps({"tool_name": tool_name, "tool_input": tool_input}),
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_high_blast_command_denied(self, tmp_path):
+        r = self._run("Bash", {"command": "elevenlabs clone voices --all"},
+                      tmp_path / "log.md")
+        assert r.returncode == 0
+        out = json.loads(r.stdout)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "blast-radius" in reason
+        assert "blast radius" in reason   # the instruction to declare it
+
+    def test_blast_overrides_allowlist(self, tmp_path):
+        # Even a command that begins like an allowlisted metadata read is denied
+        # if it carries a high-blast action (blast gate runs FIRST).
+        r = self._run("Bash", {"command": "git push --force origin main"},
+                      tmp_path / "log.md")
+        out = json.loads(r.stdout)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_benign_bash_still_allows(self, tmp_path):
+        r = self._run("Bash", {"command": "git status"}, tmp_path / "log.md")
+        out = json.loads(r.stdout)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+def test_known_gap_opaque_script_name_escapes_gate():
+    """DOCUMENTED LIMIT (blast-1 Part A is partial by construction): a high-blast
+    action hidden behind an opaque script name carries no destructive verb in the
+    command string, so the pattern gate cannot see it. This is the case the
+    runbook discipline rule (Part B) + the independent peer exist to cover —
+    asserted here so the boundary is explicit, not a silent false sense of safety."""
+    is_blast, _ = oya_pretooluse.classify_blast_radius("python reclone_all_voices.py")
+    assert is_blast is False

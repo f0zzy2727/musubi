@@ -124,6 +124,66 @@ DISCLOSE_PATTERNS = tuple(
 #                        now fenced it would be inert anyway, but it earns nothing.
 
 
+# --- Blast-radius gate (blast-1, 2026-06-24) ---------------------------------
+# A different axis from the disclosure tiers above. Those ask "does this leak
+# secrets?"; this asks "is this an expensive / irreversible / fan-out ACTION?"
+# Field report (Michael, 1-in-a-billion bed): "apply this to the other apps"
+# became "re-clone every voice for the other apps" — an API spend that overwrote
+# resources that already existed, hand-stopped by the operator; neither peer nor
+# Oya flagged it. The existing tiers only DEFER such a command (a generic prompt
+# with no blast-radius framing). This gate POSITIVELY flags it and returns a hard
+# `deny` whose reason instructs the agent to state the blast radius (count, cost,
+# reversibility) and get an operator confirm BEFORE acting — the deny text is
+# returned to the agent, so it converts a silent overreach into a forced surface.
+#
+# Conservative + high-precision: each pattern is an unambiguously destructive,
+# irreversible, money-spending, or broadly-fanned-out action. A false positive is
+# one extra confirm; a false negative is a recloned account. Coverage is partial
+# BY CONSTRUCTION — this hook sees only Opus Bash, never Codex or in-app/API
+# actions, so the runbook discipline rule (blast-1 Part B) is the primary net and
+# this is the mechanical backstop for the shell-command slice of it.
+#
+# `(?i)` per-pattern; matched with `re.search` (the verb can sit anywhere in the
+# command, not only at the start — unlike the anchored allowlist above).
+BLAST_RADIUS_PATTERNS = tuple(
+    (re.compile(p), label) for p, label in (
+        # Irreversible filesystem / VCS destruction.
+        (r"(?i)\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r", "recursive force-delete (rm -rf)"),
+        (r"(?i)\bgit\s+push\b.*(--force\b|--force-with-lease\b|\s-f\b)", "force-push (rewrites remote history)"),
+        (r"(?i)\bgit\s+reset\s+--hard\b", "git reset --hard (discards working tree)"),
+        (r"(?i)\bgit\s+clean\s+-[a-z]*f", "git clean -f (deletes untracked files)"),
+        (r"(?i)\bfind\b.*\s-delete\b", "find -delete (bulk delete)"),
+        (r"(?i)\bxargs\b.*\b(rm|delete|destroy)\b", "xargs into a delete (fan-out delete)"),
+        # Destructive data / infra operations.
+        (r"(?i)\b(drop|truncate)\s+(table|database|schema)\b", "SQL DROP/TRUNCATE (irreversible data loss)"),
+        (r"(?i)\bdelete\s+from\b(?!.*\bwhere\b)", "DELETE without WHERE (whole-table wipe)"),
+        (r"(?i)\bterraform\s+destroy\b", "terraform destroy (tears down infra)"),
+        (r"(?i)\bkubectl\s+delete\b", "kubectl delete (removes live resources)"),
+        (r"(?i)\b(docker|podman|kubectl)\b.*\bprune\b", "container/image prune (bulk removal)"),
+        (r"(?i)\baws\s+s3\s+(rb|rm)\b", "aws s3 bucket/object removal"),
+        # Money-spending / external-resource creation, especially at scale.
+        (r"(?i)\b(clone|create|generate|synthesi[sz]e)\b.*\b(voice|voices|model|models)\b", "voice/model create/clone (API spend; may overwrite existing)"),
+        (r"(?i)(?:^|\s)--?all\b.*\b(clone|create|delete|remove|regenerate|reset|overwrite)\b", "fan-out over --all with a create/delete verb"),
+        (r"(?i)\b(clone|create|delete|remove|regenerate|reset|overwrite)\b.*(?:^|\s)--?all\b", "create/delete verb fanned out over --all"),
+        (r"(?i)\bfor\b.+\bin\b.+;\s*do\b.*\b(clone|create|delete|remove|rm|push|deploy|destroy)\b", "loop fanning a costly/destructive action over many targets"),
+    )
+)
+
+
+def classify_blast_radius(command: str) -> tuple[bool, str | None]:
+    """Return (is_high_blast, reason). reason is None when no pattern matches.
+
+    Pure + high-precision: only unambiguously destructive / irreversible / money-
+    spending / fan-out actions. The reason names the specific class so the deny
+    text can tell the agent exactly what to declare before retrying."""
+    if not isinstance(command, str) or not command.strip():
+        return False, None
+    for pattern, label in BLAST_RADIUS_PATTERNS:
+        if pattern.search(command):
+            return True, label
+    return False, None
+
+
 def _disclosure_opt_in() -> bool:
     """True when the operator has declared the repo holds no secrets worth
     protecting from a read — `[security].repo_has_no_secrets`, surfaced to the
@@ -497,8 +557,36 @@ def main() -> int:
     if not isinstance(tool_input, dict):
         tool_input = {}
 
-    auto_approve, reason = classify(tool_name, tool_input)
     summary = _summarise_input(tool_name, tool_input)
+
+    # Blast-radius gate (blast-1): checked FIRST so it overrides any allowlist
+    # match — a high-blast action is never auto-approved, even if a future
+    # allowlist would. Hard `deny`, with a reason returned to the agent that
+    # forces it to declare the blast radius and get an operator confirm before
+    # retrying. Converts a silent overreach into a surfaced decision.
+    if tool_name == "Bash":
+        is_blast, blast_reason = classify_blast_radius(
+            tool_input.get("command", ""))
+        if is_blast:
+            log_decision("BLAST-DENY", tool_name, blast_reason, summary)
+            output = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"musubi blast-radius gate: {blast_reason}. This is an "
+                        f"expensive/irreversible/fan-out action. STOP — do not run "
+                        f"it yet. Post the exact blast radius to comms first (how "
+                        f"many targets, what cost, is it reversible, does it "
+                        f"overwrite anything that already exists) and get an "
+                        f"explicit operator confirm before retrying."
+                    ),
+                }
+            }
+            sys.stdout.write(json.dumps(output))
+            return 0
+
+    auto_approve, reason = classify(tool_name, tool_input)
 
     if auto_approve:
         log_decision("ALLOW", tool_name, reason, summary)
