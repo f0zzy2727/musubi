@@ -98,6 +98,17 @@ cd "$ORCHESTRATOR_DIR" || {
 # inside orchestrator.py before agents are spawned.
 warn_icloud_path "$ORCHESTRATOR_DIR"
 
+# --- Environment / key defence (keys-1) ---
+# Load the project's .env (if present) so the orchestrator and every spawned
+# pane inherit the API keys — the panes get only the environment we hand them,
+# and a key missing here is why Codex reports it is "sandboxed". Then warn,
+# operator-readably, if a coder CLI needs a key that still isn't set.
+# shellcheck source=scripts/env-preflight.sh
+. "$ORCHESTRATOR_DIR/scripts/env-preflight.sh"
+PROJECT_PATH=$(awk -F'"' '/^[[:space:]]*path[[:space:]]*=/{print $2; exit}' "$CONFIG" 2>/dev/null || true)
+load_project_env "$PROJECT_PATH" "$ORCHESTRATOR_DIR" || true
+warn_missing_keys "$CONFIG"
+
 echo "Checking environment..."
 
 if ! command -v python3 >/dev/null 2>&1; then
