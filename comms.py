@@ -330,6 +330,67 @@ def is_idle_result(result):
     return any(pat in lowered for pat in _IDLE_RESULT_PATTERNS)
 
 
+def silence_nudge_due(idle_secs, idle_wake_secs, silence_nudges,
+                      since_last_nudge, waiting_on_operator):
+    """Decide whether the silence watchdog (idle-1) should nudge now.
+
+    Pure predicate so the watcher loop's decision is testable in isolation.
+    The channel has gone fully quiet (everything written is relayed); we wake
+    the orchestration layer when:
+
+      - the watchdog is enabled (idle_wake_secs > 0), AND
+      - the quiet has lasted at least idle_wake_secs, AND
+      - nothing is correctly pinned waiting on the operator (if work is parked
+        on a human decision, silence is expected — stay quiet), AND
+      - either we haven't nudged this silence episode yet, or a full
+        idle_wake_secs has elapsed since the last nudge (so we re-nudge /
+        escalate at a steady cadence rather than every tick).
+
+    `silence_nudges` is the count already sent this episode (reset to 0 on any
+    new comms activity); `since_last_nudge` is seconds since the last nudge.
+    """
+    if idle_wake_secs <= 0:
+        return False
+    if idle_secs < idle_wake_secs:
+        return False
+    if waiting_on_operator:
+        return False
+    return silence_nudges == 0 or since_last_nudge >= idle_wake_secs
+
+
+def comms_drop_due(armed_secs, baton_grace_secs, append_since_arm,
+                   already_surfaced, waiting_on_operator):
+    """Decide whether the comms-drop watchdog (stall-class 2) should surface now.
+
+    Pure predicate so the watcher loop's decision is testable in isolation. The
+    alarm fires when a capsule/verdict update advanced over a fully-relayed,
+    quiet channel and no comms append followed — the S3/S4 dropped-baton bug. We
+    surface when:
+
+      - the watchdog is enabled (baton_grace_secs > 0), AND
+      - the check is armed (armed_secs is the seconds since the capsule advanced
+        over a quiet channel; None means not armed), AND
+      - no comms append has landed since arming (append_since_arm is False — an
+        append means the baton flowed and there is no drop), AND
+      - we haven't already surfaced this episode, AND
+      - nothing is correctly pinned waiting on the operator (a capsule update at
+        a cycle boundary that's legitimately parked on a human decision is not a
+        drop), AND
+      - the grace window has fully elapsed.
+    """
+    if baton_grace_secs <= 0:
+        return False
+    if armed_secs is None:
+        return False
+    if append_since_arm:
+        return False
+    if already_surfaced:
+        return False
+    if waiting_on_operator:
+        return False
+    return armed_secs >= baton_grace_secs
+
+
 # Message types that assert state worth reflecting in the capsule. The
 # capsule-before-comms invariant says any such message must be posted only
 # after docs/agents/current-state.md is updated.

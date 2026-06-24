@@ -34,6 +34,8 @@ from comms import (
     parse_result_field,
     message_type,
     is_idle_result,
+    silence_nudge_due,
+    comms_drop_due,
     is_state_affecting,
     capsule_path,
     capsule_is_stale,
@@ -117,6 +119,186 @@ def pane_contains(pane, needle, lines=80):
     """Convenience: True if `needle` appears in the last N lines of the pane.
     Strips ANSI so the match works even when the CLI is using colour codes."""
     return needle in strip_ansi(capture_pane(pane, lines))
+
+
+# Known UI hint / placeholder fragments that follow a prompt marker but are NOT
+# typed user input — must not be mistaken for an unsent command.
+_PROMPT_HINT_MARKERS = (
+    "for shortcuts", "esc to", "ctrl+", "? for", "/help", "/clear to",
+    "press enter", "▌", "auto-accept", "shift+tab",
+)
+
+
+def _looks_like_ui_hint(text):
+    low = text.lower()
+    return any(h in low for h in _PROMPT_HINT_MARKERS)
+
+
+def buffer_has_pending_input(buffer):
+    """Heuristic: does a pane's visible buffer show an UNSENT typed line sitting
+    at the agent's input prompt? `send_keys` into such a pane APPENDS to and
+    garbles that pending line — the exact reason Oya refuses to comms-nudge a
+    parked coder by hand (okami log 2338/2395/2419: `❯ continue S2`,
+    `❯ keep going` left unsent).
+
+    Conservative by design: it only returns True for the two concrete prompt
+    signatures observed to hold unsent text — the Codex `❯ <text>` prompt and
+    the Claude Code bordered input box `│ > <text> │` — and filters known UI
+    hints/placeholders. When unsure it returns False (a skipped nudge is
+    recoverable; a garbled command is not, so we only skip on a positive sight).
+    Pure string predicate so it is unit-testable without a live TUI."""
+    text = strip_ansi(buffer or "")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    for ln in lines[-8:]:
+        s = ln.strip()
+        # Codex CLI prompt: a chevron followed by typed-but-unsent text.
+        m = re.match(r"^[❯➜>]\s+(\S.*)$", s)
+        if m and not _looks_like_ui_hint(m.group(1)):
+            return True
+        # Claude Code bordered input box: │ > typed text │
+        m = re.search(r"│\s*>\s+(\S.*?)\s*│", ln)
+        if m and not _looks_like_ui_hint(m.group(1)):
+            return True
+    return False
+
+
+def pane_has_pending_input(pane):
+    """True if the pane's live buffer shows an unsent typed line at its prompt.
+    Returns False on any capture failure (don't block a nudge on a read error)."""
+    return buffer_has_pending_input(capture_pane(pane, lines=12))
+
+
+# A blocking permission modal is the single highest-value stall to detect: a
+# relay-dependent agent sitting at one is invisible (no event fires to anyone),
+# a send_keys nudge is worse than useless (the keystroke lands IN the modal and
+# can pick an option), and only the human can answer it. Field: Coda parked ~83
+# min on a permission prompt mid-cycle (okami 2026-06-23 cycle-close I&A,
+# headline #1); Oya parked on an `oyakata-log.md` edit prompt 8 min into the
+# 2026-06-24 launch. The defining signature is the interactive numbered option
+# list with the selection chevron resting on a Yes/No/Allow choice — both the
+# Claude Code box and the Codex CLI render this shape.
+_MODAL_OPTION_RE = re.compile(
+    r"^[❯➜▶>]\s*\d+\.\s+(yes|no|allow|approve|deny|don'?t|reject)\b",
+    re.IGNORECASE)
+
+
+def buffer_has_permission_modal(buffer):
+    """Return a short question-summary string when a pane's visible buffer sits
+    at a blocking permission/approval modal, else None.
+
+    Conservative, pure, and unit-testable (no live TUI). The positive signal is
+    the highlighted numbered option (`❯ 1. Yes`) that both the Claude Code
+    permission box and the Codex approval prompt render — agent prose that merely
+    mentions "do you want to" never produces that selector line. When the modal
+    is found we walk upward for the nearest question line (ending in `?`) to name
+    the specific ask for the operator surface; absent one we return a generic
+    label so the caller still knows a modal is blocking."""
+    text = strip_ansi(buffer or "")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    for i in range(len(lines) - 1, -1, -1):
+        if _MODAL_OPTION_RE.match(lines[i].strip()):
+            # Found the selected option. Name the ask from the nearest question
+            # line above it (skip the option lines themselves).
+            for j in range(i - 1, max(i - 8, -1), -1):
+                cand = lines[j].strip()
+                if cand.endswith("?") and not _looks_like_ui_hint(cand):
+                    return cand
+            return "a permission prompt is blocking this pane"
+    return None
+
+
+def pane_permission_modal(pane):
+    """The question summary if the pane's live buffer is at a permission modal,
+    else None. Returns None on any capture failure (don't false-alarm on a read
+    error — a missed modal is recoverable on the next tick)."""
+    return buffer_has_permission_modal(capture_pane(pane, lines=14))
+
+
+# A pane mid-turn must NEVER be nudged (the park watchdog, stall-class 3) — a
+# send_keys into a working pane garbles the next prompt and the nudge is noise.
+# The cross-CLI "I am running" signal is `esc to interrupt`; Claude also shows a
+# live gerund spinner with an elapsed timer (`· Herding… (4m 31s · ↓ 14.7k
+# tokens · still thinking)`). The PAST-tense done markers (`Crunched for 29s`,
+# `Worked for 1m 53s`) deliberately do NOT match — those mean the turn finished
+# and the pane is now idle, which is exactly the park we want to catch.
+_WORKING_MARKERS_RE = re.compile(
+    r"esc to interrupt"               # both CLIs, only while a turn runs
+    r"|still thinking"                # Claude spinner tail
+    r"|[·✻✶✳✦◐◓◑◒*]\s*[A-Za-z]+…"     # spinner glyph + gerund + ellipsis
+    r"|[A-Za-z]+…\s*\(\s*\d",         # gerund-ellipsis immediately before "(4m…"
+    re.IGNORECASE)
+
+
+def buffer_is_working(buffer):
+    """True if the pane's visible buffer shows an in-progress turn (a live
+    spinner / interrupt hint). Pure + conservative: matches only the animated
+    running signatures, never the past-tense `… for Ns` completion lines, so a
+    finished-then-idle pane reads as NOT working. Plain agent prose can't match
+    (the gerund must sit beside a spinner glyph or an elapsed timer)."""
+    return bool(_WORKING_MARKERS_RE.search(strip_ansi(buffer or "")))
+
+
+def classify_pane_state(buffer):
+    """Single precedence classifier for the stall watchdog. Pure + unit-testable.
+    MODAL (never keystroke) > PENDING_INPUT (only the human submits it) > WORKING
+    (leave it alone) > IDLE (candidate park)."""
+    if buffer_has_permission_modal(buffer) is not None:
+        return "MODAL"
+    if buffer_has_pending_input(buffer):
+        return "PENDING_INPUT"
+    if buffer_is_working(buffer):
+        return "WORKING"
+    return "IDLE"
+
+
+# Claude Code surfaces context pressure as a "/clear to save <N>k tokens" hint
+# (and variants) once the session grows heavy. okami's recurring implementer
+# deaths were at ~478k / 720k / 898k tokens — a nudge cannot recover a
+# context-dead pane, so the watchdog warns the operator BEFORE death.
+_CONTEXT_PRESSURE_RE = re.compile(
+    r"(?:/clear\s+to\s+save|save)\s+~?([\d][\d,.]*)\s*k\b", re.IGNORECASE)
+
+
+def parse_context_pressure_k(buffer):
+    """Return the largest context-pressure figure (in thousands of tokens) shown
+    in a pane buffer, or None if no such hint is present. Pure + unit-testable."""
+    text = strip_ansi(buffer or "")
+    best = None
+    for m in _CONTEXT_PRESSURE_RE.finditer(text):
+        try:
+            val = float(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        if best is None or val > best:
+            best = val
+    return best
+
+
+def quarantine_log_path(comms_file):
+    """The single append-only quarantine log beside the comms file. Replaces the
+    old one-file-per-incident sidecars (`_unparseable_<timestamp>.txt`) that
+    proliferated to 47 files on the okami bed — bounded blast radius, one place
+    to look."""
+    return os.path.join(os.path.dirname(comms_file) or ".", "_unparseable.log")
+
+
+def append_quarantine_entry(comms_file, content, reason):
+    """Append one skipped/unparseable region to the consolidated quarantine log
+    with a timestamped, labelled header. Best-effort: returns the log path on
+    success, None on failure (the caller logs the failure but never breaks the
+    relay loop over it)."""
+    path = quarantine_log_path(comms_file)
+    header = (f"\n===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+              f"[{reason}] {len(content.encode('utf-8'))} bytes =====\n")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(header)
+            f.write(content)
+            if not content.endswith("\n"):
+                f.write("\n")
+        return path
+    except Exception:
+        return None
 
 
 def tmux_has_attached_client(session):
@@ -1152,6 +1334,22 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     unparseable_retries = 0
     UNPARSEABLE_RETRY_LIMIT = 3
 
+    # Silence watchdog (idle-1). The stall nudge below only fires on a
+    # half-written message (new content without the over-signal). It does NOT
+    # cover the channel going FULLY quiet after everything has been relayed:
+    # the pair does not self-continue after a turn, and if Oya has also parked,
+    # the whole workshop sleeps until a human pokes it. That is the "they go
+    # idle the moment I walk away" failure (field report 2026-06-20, which Oya
+    # self-admitted: "I posted work to the coders and then went quiet … every-
+    # thing fell asleep, including me"). When the channel is quiet for
+    # idle_wake_secs with nothing pinned for the operator, we wake the
+    # orchestration layer — the built-in equivalent of the operator's proven
+    # `/loop 5m` Oya cadence. Default 300s; set [comms].idle_wake_seconds = 0
+    # to disable.
+    idle_wake_secs = cfg.get("comms", {}).get("idle_wake_seconds", 300)
+    silence_nudges = 0
+    last_silence_nudge_time = 0.0
+
     opus_handle = cfg["agents"]["opus"]["handle"]
     coda_handle = cfg["agents"]["coda"]["handle"]
 
@@ -1292,6 +1490,77 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
             refusal_notified.clear()
             _pin_status()
 
+    def _wake_idle_channel(idle_s, nudge_num):
+        """Idle-1: the channel has gone fully quiet with work presumably open.
+        Wake the orchestration layer so the pair doesn't sleep until a human
+        pokes it. Prefer Oya — she owns the overview and can re-drive the pair;
+        fall back to nudging the coders directly on a pair-only bed. On a second
+        nudge within the same silence, escalate to the operator surface: the
+        agents aren't self-clearing, so the human should look.
+
+        Pane-collision guard (idle-1 hardening 2026-06-22): a coder pane often
+        parks with its next action TYPED BUT UNSENT (`❯ continue S2`). Keying a
+        nudge into that pane appends to and garbles the pending line — which is
+        why Oya refuses to comms-nudge a parked coder by hand. So we skip the
+        keystroke on any pane that shows pending input and route the operator to
+        clear it instead — the human is the only one who can submit that line."""
+        mins = idle_s / 60.0
+        skipped = []  # panes we could not safely key (unsent input present)
+
+        def _safe_nudge(pane, label, msg):
+            if pane_has_pending_input(pane):
+                skipped.append(label)
+                _log("WATCHER", f"idle watchdog: {label} pane has an unsent "
+                                f"typed line — skipped keystroke to avoid "
+                                f"garbling it; routing the operator to clear it.")
+                return False
+            send_message(pane, msg, cfg)
+            return True
+
+        if oya_active and p_oyakata is not None:
+            _safe_nudge(p_oyakata, "Oya",
+                f"[idle watchdog] The comms channel has been silent for "
+                f"{idle_s:.0f}s (~{mins:.0f} min) and nothing is pinned for the "
+                f"operator. You own the orchestration overview — do not let the "
+                f"workshop sit idle. Check whether the open slice is actually "
+                f"progressing: if a coder parked after its turn, wake it "
+                f"(@OPUS / @CODA) with the next concrete step; if it's genuinely "
+                f"blocked, name the blocker or pin an operator action; if the "
+                f"cycle is legitimately complete and waiting on @LEAD, pin that "
+                f"as an operator action so this watchdog stays quiet.")
+            if not skipped:
+                _log("WATCHER", f"idle watchdog: woke Oya after {idle_s:.0f}s "
+                                f"silence (nudge {nudge_num}).")
+        else:
+            _safe_nudge(p_claude, "Opus",
+                f"[idle watchdog] The comms channel has been silent for "
+                f"{idle_s:.0f}s (~{mins:.0f} min). If you have an open slice, "
+                f"post your next concrete step or a real blocker to the comms "
+                f"file — do not park after your turn. If your work is genuinely "
+                f"done and waiting on a decision, say so explicitly.")
+            _safe_nudge(p_codex, "Coda",
+                f"[idle watchdog] The comms channel has been silent for "
+                f"{idle_s:.0f}s (~{mins:.0f} min). If you have an open slice, "
+                f"post your next concrete step or a real blocker to the comms "
+                f"file — do not park after your turn. If your work is genuinely "
+                f"done and waiting on a decision, say so explicitly.")
+            if not skipped:
+                _log("WATCHER", f"idle watchdog: nudged both coders after "
+                                f"{idle_s:.0f}s silence (nudge {nudge_num}).")
+        # Escalate to the operator surface when (a) a persistent stall the agents
+        # can't self-clear (2nd nudge), OR (b) we had to skip a pane because it
+        # holds an unsent line — only the human can submit that line. A normal
+        # pair relay clears the pin.
+        if nudge_num >= 2 or skipped:
+            detail = (f"channel silent ~{mins:.0f} min and not self-clearing — "
+                      f"the pair may have parked. Check the panes.")
+            if skipped:
+                detail = (f"channel silent ~{mins:.0f} min; "
+                          f"{'/'.join(skipped)} pane(s) have an UNSENT typed line "
+                          f"— press Enter (or Ctrl-U to clear) so they submit. "
+                          f"Watchdog won't key a pane with pending input.")
+            _surface_refusal("idle-stall", detail)
+
     # Mid-session staleness detection (orch-3 mitigation 2). Capture the
     # orchestrator repo's HEAD at startup and re-check periodically; warn once
     # if it advances, because code/config changes don't take effect until the
@@ -1301,6 +1570,60 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     STALENESS_CHECK_EVERY = 40  # ticks (~2 min at 3s/tick)
     _tick_count = 0
     _staleness_warned = False
+
+    # Context-budget watchdog (2026-06-22). A heavy implementer session stalls or
+    # dies once its context fills; a nudge can't recover it, only a human restart
+    # can. Watch each coder pane for the "/clear to save <N>k tokens" pressure
+    # hint and surface an operator warning BEFORE death. Threshold in thousands
+    # of tokens; [comms].context_warn_k = 0 disables. Warned-once per pane until
+    # the pressure clears (a /clear or restart drops the figure back down).
+    context_warn_k = cfg.get("comms", {}).get("context_warn_k", 400)
+    CONTEXT_CHECK_EVERY = 10  # ticks (~30s at 3s/tick)
+    _context_warned = {"Opus": False, "Coda": False}
+
+    # Permission-modal watchdog (stall-class 1, 2026-06-24). A relay-dependent
+    # pane blocked on a permission/approval modal is silent — no event fires and
+    # a send_keys nudge lands IN the modal. Detection is always on (no config to
+    # disable a safety alarm); we surface the SPECIFIC ask to the operator and
+    # never keystroke. Re-armed per pane once the modal clears so a fresh prompt
+    # alarms again. Same ~30s cadence as the context check — modal halts run for
+    # tens of minutes, so 30s detection is ample.
+    MODAL_CHECK_EVERY = 10  # ticks (~30s at 3s/tick)
+    _modal_surfaced = {"Opus": False, "Coda": False, "Oya": False}
+
+    # Per-pane park watchdog (stall-class 3, 2026-06-24). The channel-level
+    # silence watchdog (idle-1) only fires when the WHOLE channel goes quiet; a
+    # single coder that parks after its own non-terminal turn while the other is
+    # still posting is invisible to it (channel isn't quiet). This catches that:
+    # a pane that is IDLE (not working / not at a modal / no unsent line) and has
+    # not changed for pane_idle_seconds gets one next-step nudge, then escalates
+    # to the operator if it still doesn't self-clear. Coders only — Oya's quiet
+    # is legitimate (collecting/heartbeat) and her log-mtime heartbeat + the
+    # silence watchdog already cover her. [comms].pane_idle_seconds = 0 disables.
+    pane_idle_secs = cfg.get("comms", {}).get("pane_idle_seconds", 240)
+    PARK_CHECK_EVERY = 10  # ticks (~30s at 3s/tick)
+    _park_idle_since = {"Opus": time.time(), "Coda": time.time()}
+    _park_last_buf = {"Opus": None, "Coda": None}
+    _park_nudges = {"Opus": 0, "Coda": 0}
+
+    # Comms-drop watchdog (stall-class 2, 2026-06-24). The S3/S4 field bug: a
+    # reviewer's verdict landed in the capsule but the comms append did NOT reach
+    # EOF, so no relay fired and no event reached anyone — the implementer held
+    # ~12 min for a baton that never came. The mid-cycle fix (true-EOF append)
+    # addressed the cause; this is the missing DETECTOR. Signature: the capsule
+    # advanced (a verdict/state landed) while the comms channel is fully relayed
+    # and quiet, and no append follows within baton_grace_seconds. Far faster +
+    # more diagnostic than waiting for the 300s channel-silence net. Tracked with
+    # its OWN capsule-mtime so it never interferes with the Oya capsule-edit
+    # watcher. [comms].baton_grace_seconds = 0 disables.
+    baton_grace_secs = cfg.get("comms", {}).get("baton_grace_seconds", 90)
+    try:
+        _baton_capsule_mtime = os.path.getmtime(capsule_path)
+    except FileNotFoundError:
+        _baton_capsule_mtime = 0
+    _baton_armed_at = None      # time the capsule advanced over a quiet channel
+    _baton_size_at_arm = None   # comms size at arm (an append past it = baton ok)
+    _baton_surfaced = False
 
     known_handles = recognised_handles(cfg)
 
@@ -1444,6 +1767,36 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                                     f"to load it.")
                     _staleness_warned = True
 
+            # Context-budget watchdog: warn the operator before a coder pane
+            # dies of context exhaustion (a nudge can't recover it). Cheap —
+            # capture every ~30s, not every tick.
+            if context_warn_k > 0 and _tick_count % CONTEXT_CHECK_EVERY == 0:
+                for pane, label in ((p_claude, "Opus"), (p_codex, "Coda")):
+                    pressure = parse_context_pressure_k(capture_pane(pane, lines=12))
+                    if pressure is not None and pressure >= context_warn_k:
+                        if not _context_warned[label]:
+                            _context_warned[label] = True
+                            _surface_refusal(
+                                f"context-budget-{label.lower()}",
+                                f"{label} pane is at ~{pressure:.0f}k tokens "
+                                f"(>= {context_warn_k}k) — refresh it (/compact or "
+                                f"/clear, or relaunch) at the next clean boundary "
+                                f"BEFORE it stalls. A nudge can't recover a "
+                                f"context-dead pane; state is safe on disk/capsule.")
+                            _log("WATCHER", f"context watchdog: {label} at "
+                                            f"~{pressure:.0f}k tokens — warned operator.")
+                    elif pressure is None or pressure < context_warn_k:
+                        # Pressure cleared (refresh/restart) — re-arm the warning
+                        # so a fresh climb past the threshold warns again. Also
+                        # clear the refusal-notify state for this guard, else
+                        # _surface_refusal stays silent for the rest of the episode.
+                        if _context_warned[label]:
+                            guard = f"context-budget-{label.lower()}"
+                            refusal_notified.discard(guard)
+                            refusal_counts.pop(guard, None)
+                            _pin_status()
+                        _context_warned[label] = False
+
             # Oya pane: lazy discovery — keep trying until found, then cache.
             if oya_active and p_oyakata is None:
                 p_oyakata = discover_oyakata_pane(session, cfg)
@@ -1454,6 +1807,128 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                 if p_oyakata is not None and oya_boot_note:
                     _deliver_oya_boot_note(p_oyakata)
                     oya_boot_note = None  # once only
+
+            # Permission-modal watchdog (stall-class 1): surface any pane sitting
+            # at a blocking permission/approval prompt to the operator — the only
+            # one who can answer it. Never keystroke a modal. Re-arm per pane when
+            # the modal clears. Covers the workers AND Oya (today's live stall was
+            # Oya parked on an oyakata-log.md edit prompt).
+            if _tick_count % MODAL_CHECK_EVERY == 0:
+                modal_panes = [(p_claude, "Opus"), (p_codex, "Coda")]
+                if oya_active and p_oyakata is not None:
+                    modal_panes.append((p_oyakata, "Oya"))
+                for pane, label in modal_panes:
+                    question = pane_permission_modal(pane)
+                    guard = f"perm-modal-{label.lower()}"
+                    if question is not None:
+                        if not _modal_surfaced[label]:
+                            _modal_surfaced[label] = True
+                            _surface_refusal(
+                                guard,
+                                f"{label} is blocked on a permission prompt: "
+                                f"\"{question}\" — approve or deny it in the "
+                                f"{label} pane. A relay nudge can't clear a modal.")
+                            _log("WATCHER", f"modal watchdog: {label} blocked on "
+                                            f"a permission prompt — surfaced to "
+                                            f"operator ({question!r}).")
+                    elif _modal_surfaced[label]:
+                        # Modal answered — re-arm so the next prompt alarms, and
+                        # clear this guard's refusal-notify state (mirror the
+                        # context-budget re-arm) so the pin/banner can fire again.
+                        refusal_notified.discard(guard)
+                        refusal_counts.pop(guard, None)
+                        _pin_status()
+                        _modal_surfaced[label] = False
+                        _log("WATCHER", f"modal watchdog: {label} modal cleared "
+                                        f"— re-armed.")
+
+            # Per-pane park watchdog (stall-class 3): catch a single coder pane
+            # parked after its own turn even while the channel is not quiet.
+            if pane_idle_secs > 0 and _tick_count % PARK_CHECK_EVERY == 0:
+                now = time.time()
+                for pane, label in ((p_claude, "Opus"), (p_codex, "Coda")):
+                    buf = capture_pane(pane, lines=14)
+                    if buf != _park_last_buf[label]:
+                        # The pane did something — reset the idle clock + nudges.
+                        _park_last_buf[label] = buf
+                        _park_idle_since[label] = now
+                        _park_nudges[label] = 0
+                        continue
+                    state = classify_pane_state(buf)
+                    if state != "IDLE":
+                        # Working / at a modal / holding an unsent line — not a
+                        # park (those classes own it). Hold the clock at 'now' so
+                        # a later transition to IDLE starts a fresh interval.
+                        _park_idle_since[label] = now
+                        continue
+                    idle = now - _park_idle_since[label]
+                    if idle < pane_idle_secs:
+                        continue
+                    # Parked past threshold. First time → nudge the pane with the
+                    # next concrete step; persisting → escalate to the operator.
+                    _park_nudges[label] += 1
+                    mins = idle / 60.0
+                    if _park_nudges[label] == 1:
+                        send_message(pane,
+                            f"[park watchdog] Your pane has shown no movement for "
+                            f"~{mins:.0f} min and you are not mid-turn. If you have "
+                            f"an open slice, post your next concrete step or a real "
+                            f"blocker to {comms_file} — do not park after your turn. "
+                            f"If you are done and waiting on a decision, say so "
+                            f"explicitly.", cfg)
+                        _log("WATCHER", f"park watchdog: {label} parked "
+                                        f"~{mins:.0f} min — nudged the pane.")
+                    else:
+                        _surface_refusal(f"park-{label.lower()}",
+                            f"{label} pane parked ~{mins:.0f} min and not self-"
+                            f"clearing after a nudge — check the pane.")
+                        _log("WATCHER", f"park watchdog: {label} still parked "
+                                        f"~{mins:.0f} min after nudge — surfaced "
+                                        f"to operator.")
+                    # Restart the interval so the next escalation waits a full
+                    # pane_idle_secs rather than firing every tick.
+                    _park_idle_since[label] = now
+
+            # Comms-drop watchdog (stall-class 2): a capsule/verdict update that
+            # never made it into the comms channel, leaving an agent waiting on a
+            # baton that won't come. Cheap (mtime + size compares) — every tick.
+            if baton_grace_secs > 0:
+                try:
+                    _cur_cap_m = os.path.getmtime(capsule_path)
+                except FileNotFoundError:
+                    _cur_cap_m = _baton_capsule_mtime
+                now = time.time()
+                if _cur_cap_m > _baton_capsule_mtime:
+                    _baton_capsule_mtime = _cur_cap_m
+                    # Arm only if the channel is fully relayed: the symptom is a
+                    # capsule that moved PAST a quiet channel. If comms is still
+                    # draining, a normal append is in flight — not a drop.
+                    if current_size == last_offset:
+                        _baton_armed_at = now
+                        _baton_size_at_arm = current_size
+                        _baton_surfaced = False
+                    else:
+                        _baton_armed_at = None
+                _append_since_arm = (_baton_armed_at is not None
+                                     and current_size > (_baton_size_at_arm or 0))
+                if _append_since_arm:
+                    # The baton flowed after we armed; disarm.
+                    _baton_armed_at = None
+                _armed_secs = (now - _baton_armed_at
+                               if _baton_armed_at is not None else None)
+                if comms_drop_due(_armed_secs, baton_grace_secs,
+                                  _append_since_arm, _baton_surfaced,
+                                  bool(oa_active and oa_status_text)):
+                    _baton_surfaced = True
+                    _surface_refusal("comms-drop",
+                        f"a capsule/verdict update landed but no comms append "
+                        f"followed in ~{baton_grace_secs:.0f}s and the channel "
+                        f"is quiet — the relay baton may be dropped (a verdict "
+                        f"in the capsule that never relayed). Check the comms "
+                        f"file EOF; a waiting agent won't get its baton.")
+                    _log("WATCHER", f"comms-drop watchdog: capsule advanced "
+                                    f"but no comms append in {baton_grace_secs:.0f}s "
+                                    f"— surfaced to operator.")
 
             # Capsule edit watcher: notify Oya when the capsule's mtime changes.
             if oya_active and p_oyakata is not None \
@@ -1558,8 +2033,23 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                 last_growth_time = time.time()
                 last_size_seen = current_size
                 nudged_at_size = None
+                silence_nudges = 0  # new activity — re-arm the silence watchdog
 
             if current_size == last_offset:
+                # Everything written has been relayed. Run the silence watchdog
+                # (idle-1): if the channel stays quiet past idle_wake_secs and
+                # nothing is correctly waiting on the operator, wake the
+                # orchestration layer so the pair doesn't sleep until poked.
+                if idle_wake_secs > 0:
+                    now = time.time()
+                    idle = now - last_growth_time
+                    waiting_on_operator = bool(oa_active and oa_status_text)
+                    if silence_nudge_due(idle, idle_wake_secs, silence_nudges,
+                                         now - last_silence_nudge_time,
+                                         waiting_on_operator):
+                        silence_nudges += 1
+                        last_silence_nudge_time = now
+                        _wake_idle_channel(idle, silence_nudges)
                 continue
 
             new_content = read_new_content(comms_file, last_offset)
@@ -1621,34 +2111,38 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                         # cascade, okami bed 2026-06-11).
                         skipped_bytes = len(
                             new_content[:consumed_chars].encode("utf-8"))
-                        # Save the unparseable region to a sidecar so the
-                        # operator can recover if a real message was in it.
-                        # Sidecar path: alongside the comms file, named
-                        # `_unparseable_<HHMMSS>.txt`. Best-effort write —
-                        # failure here is logged but doesn't break the loop.
-                        try:
-                            sidecar_dir = os.path.dirname(comms_file) or "."
-                            sidecar = os.path.join(
-                                sidecar_dir,
-                                f"_unparseable_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-                            with open(comms_file, "r", encoding="utf-8", errors="replace") as cf:
-                                cf.seek(last_offset)
-                                content = cf.read(skipped_bytes)
-                            with open(sidecar, "w", encoding="utf-8") as sc:
-                                sc.write(content)
-                            sidecar_note = f"Saved to {sidecar}."
-                        except Exception as e:
-                            sidecar_note = f"(Sidecar save FAILED: {e!r} — content lost in memory.)"
-                        print(f"[{ts()}] [WATCHER] WARN: giving up after {unparseable_retries} retries — "
-                              f"skipping {skipped_bytes} unparseable bytes. {sidecar_note} If a real "
-                              f"message was lost, ask the agent to re-send it with a proper "
-                              f"[{opus_handle}] / [{coda_handle}] header.")
-                        # orch-8: a silent skip looks identical to a dead relay
-                        # from the operator seat — surface the drop.
-                        _surface_refusal(
-                            "unparseable-drop",
-                            f"skipped {skipped_bytes} bytes with no recognised "
-                            f"handle — {sidecar_note}")
+                        skipped_text = new_content[:consumed_chars]
+                        unknown = unrecognised_handles_in(skipped_text, known_handles)
+                        # Save the unparseable region to the consolidated
+                        # quarantine log (one file, not a sidecar per incident).
+                        qpath = append_quarantine_entry(
+                            comms_file, skipped_text,
+                            reason="unknown-handle" if unknown else "orphan-tail")
+                        q_note = (f"Logged to {qpath}." if qpath
+                                  else "(quarantine-log write FAILED — content lost in memory.)")
+                        # Differentiate the two failure shapes:
+                        #   unknown-handle — a REAL message from a sender the
+                        #     running config doesn't know (e.g. a new agent added
+                        #     after boot). orch-8: surface it, it looks like a
+                        #     dead relay from the operator seat.
+                        #   orphan-tail — debris with NO handle at all, the tail of
+                        #     a message whose head was already relayed at a compose
+                        #     boundary. Expected; log it but do NOT alarm the
+                        #     operator (this is what made 47 sidecars + 47 pins of
+                        #     noise on the okami bed).
+                        if unknown:
+                            print(f"[{ts()}] [WATCHER] WARN: giving up after {unparseable_retries} retries — "
+                                  f"skipping {skipped_bytes} bytes from unrecognised sender(s) "
+                                  f"{', '.join(unknown)}. {q_note} Restart the orchestrator to load "
+                                  f"the handle, or ask the agent to repost under "
+                                  f"[{opus_handle}] / [{coda_handle}].")
+                            _surface_refusal(
+                                "unparseable-drop",
+                                f"skipped {skipped_bytes} bytes from unrecognised "
+                                f"sender(s) {', '.join(unknown)} — {q_note}")
+                        else:
+                            print(f"[{ts()}] [WATCHER] orphan-tail debris ({skipped_bytes} bytes, no "
+                                  f"handle) at a compose boundary — quarantined, not surfacing. {q_note}")
                         last_offset += skipped_bytes
                         unparseable_at_size = None
                         unparseable_retries = 0

@@ -627,3 +627,56 @@ class TestOperatorHandle:
         assert mock_subprocess.Popen.called
         _args, kwargs = mock_subprocess.Popen.call_args
         assert kwargs.get("env", {}).get("MUSUBI_OPERATOR_HANDLE") == "@MICHI"
+
+
+# ---------------------------------------------------------------------------
+# Quarantine consolidation + orphan-tail vs unknown-handle (P3, 2026-06-22)
+# ---------------------------------------------------------------------------
+
+from orchestrator import (
+    quarantine_log_path,
+    append_quarantine_entry,
+    unrecognised_handles_in,
+)
+
+
+def test_quarantine_log_is_single_file_beside_comms(tmp_path):
+    comms = str(tmp_path / "docs" / "agents" / "comms" / "active.txt")
+    os.makedirs(os.path.dirname(comms))
+    assert quarantine_log_path(comms) == os.path.join(
+        os.path.dirname(comms), "_unparseable.log")
+
+
+def test_quarantine_appends_not_proliferates(tmp_path):
+    comms = str(tmp_path / "active.txt")
+    p1 = append_quarantine_entry(comms, "first orphan tail\n<OVER>\n", "orphan-tail")
+    p2 = append_quarantine_entry(comms, "second orphan tail\n<OVER>\n", "orphan-tail")
+    # Same single file for both incidents (no per-incident sidecars).
+    assert p1 == p2 == quarantine_log_path(comms)
+    contents = open(p1).read()
+    assert "first orphan tail" in contents and "second orphan tail" in contents
+    assert contents.count("[orphan-tail]") == 2
+    # Exactly one quarantine artifact in the dir, not two.
+    assert [f for f in os.listdir(tmp_path) if "unparseable" in f] == ["_unparseable.log"]
+
+
+def test_quarantine_entry_records_reason_and_size(tmp_path):
+    comms = str(tmp_path / "active.txt")
+    append_quarantine_entry(comms, "abc", "unknown-handle")
+    log = open(quarantine_log_path(comms)).read()
+    assert "[unknown-handle]" in log
+    assert "3 bytes" in log
+
+
+def test_orphan_tail_has_no_unrecognised_handle(cfg):
+    # A pure orphan tail (no bracketed handle at all) => not an unknown-handle
+    # drop => the loop must NOT alarm the operator.
+    known = ["@OPUS", "@CODA", "@OYA"]
+    tail = "...the rest of my reasoning about the schema.\n<OVER>\n"
+    assert unrecognised_handles_in(tail, known) == []
+
+
+def test_unknown_handle_is_detected_for_surfacing(cfg):
+    known = ["@OPUS", "@CODA"]
+    msg = "[@MICHI] [2026-06-22] [10:00 UTC]\nreal message\n<OVER>\n"
+    assert unrecognised_handles_in(msg, known) == ["@MICHI"]
