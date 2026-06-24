@@ -125,3 +125,70 @@ def test_exchange_level_single_vs_multi_round(tmp_path):
     assert m["contested_slices"] == 2          # S1, S2 (S3 clean, excluded)
     assert m["single_exchange_contested_rate"] == 0.5   # S1 of {S1,S2}
     assert m["multi_round_contested_rate"] == 0.5       # S2 of {S1,S2}
+
+
+# --- consensus-1 v0 scorer: correlated_blindspot_score ----------------------
+
+score = cm.correlated_blindspot_score
+
+
+def test_all_components_high_is_high_band():
+    # rubber-stamp + no dissent + converged vocab + premature consensus + misses
+    r = score(zfa=0.9, dissent_rate=0.05, sei=0.02, single_exchange_rate=0.9,
+              escape_n=8, review_msgs=10)
+    assert r["band"] == "high"
+    assert r["score"] >= 0.6
+    assert set(r["components"]) == {
+        "rubber_stamp", "dissent_absence", "role_convergence",
+        "premature_consensus", "realized_miss",
+    }
+
+
+def test_healthy_pair_is_low_band():
+    # lots of dissent, differentiated roles, multi-round, no escapes
+    r = score(zfa=0.1, dissent_rate=0.6, sei=0.3, single_exchange_rate=0.1,
+              escape_n=0, review_msgs=20)
+    assert r["band"] == "low"
+    assert r["score"] < 0.4
+    # SEI above the reference => zero convergence risk
+    assert r["components"]["role_convergence"] == 0.0
+
+
+def test_missing_signals_are_omitted_not_faked():
+    # no SEI (single coder) and no Slice tags -> those components absent,
+    # score still computed from the rest, not invented.
+    r = score(zfa=0.5, dissent_rate=0.3, sei=None, single_exchange_rate=None,
+              escape_n=0, review_msgs=5)
+    assert "role_convergence" not in r["components"]
+    assert "premature_consensus" not in r["components"]
+    assert r["components"]  # still has rubber_stamp + dissent_absence + realized_miss
+    assert r["score"] is not None
+
+
+def test_no_data_returns_none_score():
+    r = score(zfa=None, dissent_rate=None, sei=None, single_exchange_rate=None,
+              escape_n=0, review_msgs=0)
+    assert r["score"] is None
+    assert r["band"] is None
+
+
+def test_components_clamped_to_unit_interval():
+    # escape_n > review_msgs and a tiny SEI must not push a component past 1.0
+    r = score(zfa=1.0, dissent_rate=0.0, sei=0.001, single_exchange_rate=1.0,
+              escape_n=50, review_msgs=10)
+    for v in r["components"].values():
+        assert 0.0 <= v <= 1.0
+    assert r["score"] <= 1.0
+
+
+def test_scorer_wired_into_analyze(tmp_path):
+    corpus = (
+        "[@OPUS] [2026-06-01] [10:00 UTC]\n"
+        "Type: Review Result\nSlice: S1\nGO: yes\n- a: not-found — ok\n"
+    )
+    d = tmp_path / "docs" / "agents" / "comms"
+    d.mkdir(parents=True)
+    (d / "active.txt").write_text(corpus)
+    m = cm.analyze(cm.find_files(str(tmp_path / "docs" / "agents")))
+    assert "correlated_blindspot_risk" in m
+    assert "score" in m["correlated_blindspot_risk"]

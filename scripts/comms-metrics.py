@@ -285,6 +285,78 @@ def analyze(files):
         'single_exchange_contested_rate': single_exchange_rate,  # contested resolved in 1 turn — HIGH = premature
         'multi_round_contested_rate': multi_round_rate,          # contested with ≥2 turns — the goal
         'avg_tokens_per_msg': round(total_tokens/n, 1),
+        # consensus-1 v0: composite correlated-blindspot risk from the signals
+        # above (rubber-stamp + dissent-absence + role-convergence + premature-
+        # consensus + realised-miss). Treat HIGH as the alarm, not health.
+        'correlated_blindspot_risk': correlated_blindspot_score(
+            round(rr_clean/(rr_total or 1), 3) if rr_total else None,
+            round(rr_dissent/(rr_total or 1), 3) if rr_total else None,
+            sei,
+            single_exchange_rate,
+            escape_n,
+            review_msgs,
+        ),
+    }
+
+
+# Rough "differentiated-enough" reference for coder role-divergence (SEI / JS-div
+# of the two coders' vocab). Observational, not a law: across beds a healthy pair
+# runs SEI ~0.15-0.25; okami fell to 0.078 as the coders converged. Used only to
+# normalise the convergence component below — tune per corpus, don't over-trust.
+SEI_DIFFERENTIATED_REF = 0.2
+
+
+def correlated_blindspot_score(zfa, dissent_rate, sei, single_exchange_rate,
+                               escape_n, review_msgs, sei_ref=SEI_DIFFERENTIATED_REF):
+    """consensus-1 v0 SCORER (read-only). Treat consensus as the alarm, not the
+    goal: score how much of the pair's agreement is *dissent-free agreement at
+    correlated-blindspot risk*. HIGH = the two coders are approving cleanly,
+    sound alike, and settle contested slices in one exchange — the shape that
+    precedes a correlated miss under imperfect verification.
+
+    Composite = unweighted mean of the AVAILABLE components below, each
+    normalised to 0..1 (higher = more risk). Components that need data this
+    corpus lacks (SEI with <2 coders; premature-consensus without Slice: tags)
+    are simply omitted, so the score degrades gracefully rather than faking a
+    number. This is the v0 scorer only — it flags the seam; it does NOT inject
+    dissent (that is v1). The ledger-side enrichment (silent_misses + blast_radius)
+    is out of scope for a comms-only scan; escape_admissions stands in here.
+
+    Returns {score, band, components, note} — or score=None if no component
+    had data.
+    """
+    def clamp01(x):
+        return max(0.0, min(1.0, x))
+
+    components = {}
+    # Rubber-stamp shape: clean approvals with zero findings.
+    if zfa is not None:
+        components['rubber_stamp'] = clamp01(zfa)
+    # Absence of explicit dissent.
+    if dissent_rate is not None:
+        components['dissent_absence'] = clamp01(1.0 - dissent_rate)
+    # Role convergence: coders' vocab collapsing toward identical (low SEI).
+    if sei is not None and sei_ref > 0:
+        components['role_convergence'] = clamp01(1.0 - sei / sei_ref)
+    # Premature consensus: contested slices that died in a single exchange.
+    if single_exchange_rate is not None:
+        components['premature_consensus'] = clamp01(single_exchange_rate)
+    # Realised correlated miss: admissions that BOTH agents missed something.
+    if review_msgs:
+        components['realized_miss'] = clamp01(escape_n / review_msgs)
+
+    if not components:
+        return {'score': None, 'band': None, 'components': {},
+                'note': 'insufficient data (no review verdicts, SEI, or Slice: tags)'}
+
+    score = round(sum(components.values()) / len(components), 3)
+    band = 'high' if score >= 0.6 else 'elevated' if score >= 0.4 else 'low'
+    return {
+        'score': score,
+        'band': band,
+        'components': {k: round(v, 3) for k, v in components.items()},
+        'note': 'consensus-as-alarm: HIGH = dissent-free agreement at correlated-'
+                'blindspot risk — inspect the seam / inject targeted dissent.',
     }
 
 

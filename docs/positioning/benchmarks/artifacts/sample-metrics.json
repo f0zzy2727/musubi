@@ -34,6 +34,18 @@
     "contested_slices": 2,
     "single_exchange_contested_rate": 0.0,
     "multi_round_contested_rate": 1.0,
-    "avg_tokens_per_msg": 34.0
+    "avg_tokens_per_msg": 34.0,
+    "correlated_blindspot_risk": {
+      "score": 0.25,
+      "band": "low",
+      "components": {
+        "rubber_stamp": 0.5,
+        "dissent_absence": 0.75,
+        "role_convergence": 0.0,
+        "premature_consensus": 0.0,
+        "realized_miss": 0.0
+      },
+      "note": "consensus-as-alarm: HIGH = dissent-free agreement at correlated-blindspot risk \u2014 inspect the seam / inject targeted dissent."
+    }
   }
 }
