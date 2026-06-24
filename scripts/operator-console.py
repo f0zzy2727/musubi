@@ -35,6 +35,11 @@ import time
 import select
 import datetime
 
+try:
+    import termios
+except ImportError:  # non-POSIX; tty setup becomes a no-op
+    termios = None
+
 BOLD = "\033[1m"
 DIM = "\033[2m"
 CYAN = "\033[36m"
@@ -53,6 +58,50 @@ DRAIN_TIMEOUT = 0.2
 # a paste in these markers. We never enable it ourselves, but strip the markers
 # defensively so they can't leak into Oya's message.
 _BRACKET_PASTE_RE = re.compile(r"\033\[20[01]~")
+
+
+# Disable / re-disable bracketed-paste mode. A prior shell can leave it ON in
+# the tty; then a paste is wrapped in \033[200~ … \033[201~ markers that the
+# canonical driver echoes as raw escapes (visible junk) and that leak toward
+# Oya. We never want it here — one paste = one coalesced message already.
+_BRACKET_PASTE_OFF = "\033[?2004l"
+
+
+def _setup_tty(fd):
+    """Force a known-good terminal state so typed AND pasted input is visible.
+
+    The pane inherits whatever termios state the previous shell left. If that
+    state had ECHO cleared (some readline-based programs exit without restoring
+    it) the operator types/pastes into the console and sees *nothing* — the
+    field-report "it's eating the text" symptom — because Python never touches
+    termios on its own. We explicitly re-assert canonical line editing with
+    echo, and turn bracketed-paste off, then hand back the original attrs so
+    run() can restore them on exit. Returns None when fd is not a tty (piped
+    input, no termios) — caller treats that as "nothing to restore".
+    """
+    if termios is None or not os.isatty(fd):
+        return None
+    try:
+        original = termios.tcgetattr(fd)
+    except termios.error:
+        return None
+    attrs = termios.tcgetattr(fd)
+    # lflags: ensure canonical mode (ICANON), input echo (ECHO), and signal
+    # keys (ISIG, so Ctrl-C still works) are ON regardless of inherited state.
+    attrs[3] |= termios.ICANON | termios.ECHO | termios.ISIG
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    sys.stdout.write(_BRACKET_PASTE_OFF)
+    sys.stdout.flush()
+    return original
+
+
+def _restore_tty(fd, original):
+    if original is None or termios is None:
+        return
+    try:
+        termios.tcsetattr(fd, termios.TCSANOW, original)
+    except termios.error:
+        pass
 
 
 def _stamp():
@@ -137,30 +186,35 @@ def _append(input_file, stamp, body):
 
 def run(input_file):
     os.makedirs(os.path.dirname(os.path.abspath(input_file)), exist_ok=True)
-    _print_header()
-    reader = Reader(sys.stdin.fileno())
-    while True:
-        sys.stdout.write("\n" + BOLD + CYAN + "YOU → " + RESET)
-        sys.stdout.flush()
-        body = reader.next_message()
-        if body is None:
-            # EOF: re-prompt rather than exit, so a stray Ctrl-D doesn't kill the
-            # operator's only input surface. A tiny sleep avoids a busy-spin if
-            # stdin is permanently closed (pane detached).
-            sys.stdout.write("\n")
-            time.sleep(0.2)
-            continue
-        if not body.strip():
-            # Blank submit — would relay an empty message to Oya. Skip.
-            continue
-        stamp = _stamp()
-        _append(input_file, stamp, body)
-        n = body.count("\n") + 1
-        suffix = (" (%d lines)" % n) if n > 1 else ""
-        sys.stdout.write(
-            DIM + "   ↳ sent to Oya (%s)%s — watch the channel pane for her reply\n\n" % (stamp, suffix) + RESET
-        )
-        sys.stdout.flush()
+    fd = sys.stdin.fileno()
+    original_attrs = _setup_tty(fd)
+    try:
+        _print_header()
+        reader = Reader(fd)
+        while True:
+            sys.stdout.write("\n" + BOLD + CYAN + "YOU → " + RESET)
+            sys.stdout.flush()
+            body = reader.next_message()
+            if body is None:
+                # EOF: re-prompt rather than exit, so a stray Ctrl-D doesn't kill
+                # the operator's only input surface. A tiny sleep avoids a
+                # busy-spin if stdin is permanently closed (pane detached).
+                sys.stdout.write("\n")
+                time.sleep(0.2)
+                continue
+            if not body.strip():
+                # Blank submit — would relay an empty message to Oya. Skip.
+                continue
+            stamp = _stamp()
+            _append(input_file, stamp, body)
+            n = body.count("\n") + 1
+            suffix = (" (%d lines)" % n) if n > 1 else ""
+            sys.stdout.write(
+                DIM + "   ↳ sent to Oya (%s)%s — watch the channel pane for her reply\n\n" % (stamp, suffix) + RESET
+            )
+            sys.stdout.flush()
+    finally:
+        _restore_tty(fd, original_attrs)
 
 
 def main(argv):
