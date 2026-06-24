@@ -6,7 +6,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-24
+
+Operational-reliability + safety release. The headline is the **stall watchdog**:
+the three silent-stall classes that recurred across cycles (an agent blocked on a
+permission modal, a single pane parked after its own turn, and a verdict that
+landed in the capsule but never relayed) are now detected mechanically and
+surfaced to the operator instead of waiting for a human to notice. Alongside it,
+a **blast-radius gate** stops a vague "apply to the others" from fanning a costly
+or destructive action across an account before anyone declares what it touches.
+
+### Added
+
+- **Stall watchdog — three silent-stall classes detected mechanically
+  (`started-idle-watchdog-gap`, `blast`-adjacent reliability).** Each recurred
+  across cycles and was only ever caught by a human. (1) *Permission-modal halt:*
+  any pane (workers + Oya) blocked on a permission/approval prompt is surfaced to
+  the operator with the specific question — never keystroke a modal. Always on.
+  (2) *Per-pane park:* a single coder pane that goes idle after its own turn
+  (`buffer_is_working` distinguishes a live spinner from a finished turn) is
+  nudged, then escalated — catches a park the channel-level silence watchdog
+  misses because the channel isn't quiet. `[comms].pane_idle_seconds` (240).
+  (3) *Comms-drop:* a capsule/verdict update that lands over a quiet, fully-relayed
+  channel with no comms append following is flagged as a dropped relay baton —
+  the S3/S4 field bug, now detected in ~90s instead of waiting on the 300s silence
+  net. `[comms].baton_grace_seconds` (90). Pure detectors, fixture-tested.
+- **Silence watchdog (`idle-1`).** When the channel is fully relayed and quiet
+  past `[comms].idle_wake_seconds` (300) with nothing pinned for the operator,
+  the orchestration layer is woken (Oya, or both coders on a pair-only bed),
+  escalating to the operator on a persistent stall — the built-in equivalent of
+  the operator's `/loop 5m` Oya cadence. Skips any pane holding an unsent typed
+  line (would garble it) and routes the operator to submit it instead.
+- **Context-budget watchdog (`P1b`).** Warns the operator before a coder pane
+  dies of context exhaustion (a nudge can't recover a context-dead pane), reading
+  the CLI's own "`/clear to save Nk tokens`" pressure hint.
+  `[comms].context_warn_k` (400).
+- **Quarantine consolidation (`P3`).** Unparseable comms regions now append to a
+  single `_unparseable.log` beside the comms file instead of proliferating
+  per-incident sidecars (the okami bed reached 47), and orphan-tail debris is
+  distinguished from a real unknown-handle drop (only the latter alarms the
+  operator).
+- **Env preflight (`keys-1`).** `scripts/env-preflight.sh` sources a project
+  `.env` and gives operator-readable guidance when an agent CLI launches without
+  the API keys it needs (the "Codex is sandboxed / has no keys" field report),
+  wired into both launchers.
+- **Agreement Auditor v0 scorer (`consensus-1`).** `scripts/comms-metrics.py`
+  emits a `correlated_blindspot_risk` composite — treating dissent-free agreement
+  as a risk signal, not a success state — from ledger silent-miss / blast-radius /
+  zero-finding-approve inputs.
+- **Rule-fire counter widening (`P2b`).** `scripts/ledger-from-comms.py` gains
+  `citation_aliases` + `citation_regex` so rule-fire reconstruction stops
+  under-counting cited rules; schema documented in `rules-ledger-schema.md`.
+
 ### Security
+
+- **Blast-radius gate on operational / cost / destructive actions (`blast-1`).**
+  Field report: "apply this to the other apps" became "re-clone every voice for
+  the other apps" — an API spend that overwrote resources that already existed,
+  hand-stopped by the operator; neither peer flagged it. Every gate to date
+  watched *code* (diffs, files, tests); none watched what runs. Part A: the
+  PreToolUse hook (`scripts/oya-pretooluse.py` `classify_blast_radius`) now
+  hard-`deny`s high-blast Bash (`rm -rf`, force-push, `reset --hard`,
+  `DROP`/`TRUNCATE`, `DELETE`-without-`WHERE`, `terraform destroy`,
+  `kubectl delete`, prune, `s3 rb`, voice/model clone, `--all` fan-out,
+  destructive loops) with a reason that tells the agent to declare the blast
+  radius (count, cost, reversibility, overwrite) and get an operator confirm
+  before retrying — checked before the allowlist, so it overrides any match.
+  Part B: an Oya pre-push red-team gate (3.6) carries the same discipline to
+  Codex, in-app/API, and opaque-script actions the Opus-Bash hook can't see.
+  Honest limit: Part A is Opus-Bash-only by construction (documented + tested).
 
 - **PreToolUse allowlist no longer auto-approves secret-disclosing reads
   (`sec-1`).** An external audit found the oyakata-2 hook equated "non-mutating"
@@ -21,8 +89,6 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `echo` is removed. Wiring quotes the hook path so a checkout location with a
   space stays one argument. The disclose opt-in logs a loud warning each launch.
 
-### Added
-
 - **`pyproject.toml` + a `musubi` console script (`pkg-1`).**
   `pip install -e '.[dev]'` builds the package and installs a `musubi` command;
   `orchestrator.py`'s entry point is now a `main()` returning an exit code.
@@ -36,6 +102,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **README: "Why peers, not a pipeline" section.** States the load-bearing
+  differentiator up front — equal peers of different lineage that both build and
+  check each other (disagreement is the mechanism), versus the delegated
+  plan→build→judge pipelines that fix each agent to a station on a line.
+- **Oya prompt hardening (`oya-1confab`, `consensus-1`, `blast-1`).** A
+  no-invent-system-internals rule (say known-vs-inferred; never name a flag/mode
+  you can't read in a file — verify and read it instead); a mandatory mechanical
+  secret/PII data-leak scan on data-touching slices (the gate's measured weak
+  spot — no longer eyeballed); the convergence→falsification rule sharpened
+  (agreement on a high-blast slice triggers injected dissent); and the
+  operational blast-radius red-team gate (3.6).
+- **New `[comms]` watchdog knobs (defaults safe, documented in
+  `musubi.toml.example`).** `idle_wake_seconds` (300), `context_warn_k` (400),
+  `pane_idle_seconds` (240), `baton_grace_seconds` (90). Existing beds inherit
+  the defaults — no config edit needed; the permission-modal class is always on
+  with no knob.
 - **Positioning: README now states up front when musubi fits — and when it's
   overkill (`scope-1`).** A new section makes the boundary explicit: musubi is
   for work where a missed defect costs more than the tokens; small/low-risk
@@ -56,6 +138,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Operator console no longer eats pasted/typed text (`console-1`).** The raw
+  `os.read`+`select` paste fix had bypassed the tty driver's echo, so input was
+  invisible until Enter. `scripts/operator-console.py` now re-asserts a known-good
+  tty state at startup (ICANON|ECHO|ISIG, bracketed-paste off, restored on exit);
+  no-ops cleanly on a non-tty.
+- **Idle watchdog won't garble a parked pane (`P2a`).** When a coder pane parks
+  with its next action typed-but-unsent (`❯ continue S2`), the silence watchdog
+  skips keying it (which would append to and corrupt the pending line) and routes
+  the operator to submit it instead.
 - **Oya's scoped `settings.local.json` is written via a JSON helper, not a
   heredoc (`robust-1`).** `scripts/write-oya-settings.py` renders the file with
   `json.dump`, so a project path containing a quote, backslash, or `$` can no

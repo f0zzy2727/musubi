@@ -37,6 +37,21 @@ operating_model = "docs/agents/PAIR_OPERATING_MODEL.md"  # rationale + adoption 
 # archive_dir = "docs/agents/archive"                    # where rotated comms transcripts land; relative to project.path
 # send_pause_seconds = 0.5                               # pause between paste and Enter in relay; raise for high-latency tmux (SSH)
 # stall_seconds = 45                                     # how long to wait for <OVER> before nudging the writing agent
+# idle_wake_seconds = 300                                # silence watchdog (idle-1): wake the orchestration layer after the
+#                                                        # channel is fully quiet this long with nothing pinned for the operator.
+#                                                        # 0 disables. Skips any pane holding an unsent typed line (would garble it).
+# context_warn_k = 400                                   # context-budget watchdog: warn the operator (operator-action surface)
+#                                                        # when a coder pane reaches this many THOUSAND tokens, before it stalls /
+#                                                        # dies of context exhaustion (a nudge can't recover a context-dead pane). 0 disables.
+# pane_idle_seconds = 240                                # per-pane park watchdog (stall-class 3): nudge a single coder pane that
+#                                                        # parked after its own turn (idle, not working/at-a-modal/holding an unsent
+#                                                        # line) for this long, even while the channel is not quiet; escalates to the
+#                                                        # operator if it still doesn't self-clear. Coders only. 0 disables.
+# baton_grace_seconds = 90                               # comms-drop watchdog (stall-class 2): warn the operator when a capsule/
+#                                                        # verdict update lands over a quiet, fully-relayed channel but no comms
+#                                                        # append follows this long (a dropped relay baton — a verdict that never
+#                                                        # relayed, the S3/S4 field bug). 0 disables.
+#                                                        # NOTE: permission-modal detection (stall-class 1) is always on — no knob.
 
 [tmux]
 session_name = "musubi"                  # tmux session name — change if running multiple sessions

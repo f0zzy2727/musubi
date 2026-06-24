@@ -17,6 +17,25 @@ The orchestration tools manage capacity. Musubi manages quality.
 
 ---
 
+## Why peers, not a pipeline
+
+Most multi-agent systems *delegate*. They split a job into fixed roles — a planner, a builder, a judge — and pass the work down the line. Each agent runs its slot and hands off. It's an assembly line with an LLM at each station.
+
+Musubi doesn't delegate. The two coders are **equal peers of different lineage**, and the point isn't to divide the labour — it's to make them disagree. One Claude, one Codex: different training, different priors, different blind spots. When they look at the same work and land in the same place, that isn't confirmation, it's a question; when they don't, the gap is usually where the bug lives.
+
+The reason runs deeper than "two opinions beat one." Real improvement is triggered by friction — a surfaced error, a challenged assumption, a test that fails — not by agreement. Agreement is comfortable and tells you nothing you didn't already believe. This is just the scientific method in miniature: progress comes from conjecture and refutation, variation and selection, not consensus. Disagreement is the variation engine; the test — running code, the diff, the operator's call — is the selection that decides which side was right. A delegated pipeline gets you neither: the judge at the end rubber-stamps a fluent plan as easily as it catches a broken one, because it shares the planner's blind spots and there was never any friction to resolve.
+
+Two honest caveats, said plainly because the whole thing rests on them:
+
+- **Different lineage makes disagreement more *likely*, not guaranteed.** Two unlike models start out less correlated than two copies of one, so they surface more. That's the bet. It is not a law.
+- **They drift back toward agreeing.** Left alone over a long session the two converge — they're trained to be agreeable and they share a lot of substrate. So the real work isn't getting disagreement once; it's keeping the *productive* disagreement alive and resolving it against evidence, instead of letting the pair settle into a comfortable consensus. That is an open engineering problem, and a good part of why the [instrumentation](#the-instrumentation-stack) exists is to measure how well we're winning it.
+
+And the disclaimer that keeps it honest: that two unlike models disagreeing produces *better outcomes* than one strong model is still a **theory**. There's a growing corpus that points that way and an [eight-week experiment](https://lugha.substack.com/p/the-best-ai-coding-team-may-be-two) behind it; there is not yet a controlled trial. Musubi is the attempt to draw the effect out and measure it, not a claim that it's settled.
+
+Where does the third agent fit? Oya doesn't sit atop a pipeline handing down tasks — there is no pipeline. She keeps the two peers honest and keeps them from collapsing into agreement: holding the plan, calling the discipline, surfacing the disagreement they glossed over. She steers; she doesn't build. The day Oya starts doing the work herself is the day the pair lost the thing that was holding them apart.
+
+---
+
 ## How it works
 
 Claude Code (Opus) and Codex (Coda) run in adjacent terminal panes. A relay watches a shared append-only comms file. When either agent finishes a message with `<OVER>`, the relay forwards it to the other pane — exactly as if a human had typed it. The human stays in the loop: monitoring, intervening, approving merges.

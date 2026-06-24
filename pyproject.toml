@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musubi"
-version = "0.2.0"
+version = "0.3.0"
 description = "Paired-LLM software engineering — two different-vendor models as colleagues, in tension, sharpening every cycle."
 readme = "README.md"
 requires-python = ">=3.11"
