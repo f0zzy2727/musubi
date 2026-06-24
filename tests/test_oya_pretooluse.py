@@ -487,3 +487,107 @@ def test_known_gap_opaque_script_name_escapes_gate():
     asserted here so the boundary is explicit, not a silent false sense of safety."""
     is_blast, _ = oya_pretooluse.classify_blast_radius("python reclone_all_voices.py")
     assert is_blast is False
+
+
+# ---------------------------------------------------------------------------
+# Repo-scoped orientation reads (2026-06-24) — friction fix under the opt-in
+# ---------------------------------------------------------------------------
+
+class TestRepoScopedReads:
+    @pytest.mark.parametrize("cmd", [
+        "cat src/app.ts",
+        "tail -n 50 docs/agents/current-state.md",
+        "head -20 README.md",
+        "nl orchestrator.py",
+        "rg TODO web/lib",
+        "grep -n foo src/x.ts",
+    ])
+    def test_in_repo_read_is_scoped(self, cmd):
+        ok, reason = oya_pretooluse.classify_repo_read(cmd)
+        assert ok is True, f"{cmd!r} should be a repo-scoped read"
+        assert reason
+
+    @pytest.mark.parametrize("cmd", [
+        "cat ~/.ssh/id_rsa",
+        "cat /etc/passwd",
+        "tail ~/.aws/credentials",
+        "rg secret ../other-repo",
+        "head /Users/x/.env",
+        # Quoted out-of-repo paths must ALSO defer: a leading quote must not mask
+        # the absolute/home escape from the repo-scope check.
+        'cat "/etc/passwd"',
+        "cat '/etc/passwd'",
+        'cat "~/.ssh/config"',
+        "head '/Users/x/secret.txt'",
+    ])
+    def test_out_of_repo_read_is_not_scoped(self, cmd):
+        ok, _ = oya_pretooluse.classify_repo_read(cmd)
+        assert ok is False, f"{cmd!r} reads outside the repo — must NOT scope"
+
+    def test_sed_read_print_in_repo(self):
+        ok, _ = oya_pretooluse.classify_sed_read("sed -n '1,40p' orchestrator.py")
+        assert ok is True
+
+    @pytest.mark.parametrize("cmd", [
+        "sed -i 's/a/b/' file.txt",        # in-place edit, not a read
+        "sed 's/a/b/' file.txt",           # no -n
+        "sed -n '1,5p' /etc/hosts",        # absolute path
+    ])
+    def test_sed_unsafe_not_scoped(self, cmd):
+        ok, _ = oya_pretooluse.classify_sed_read(cmd)
+        assert ok is False, f"{cmd!r} must not auto-scope"
+
+    def test_non_read_tool_ignored(self):
+        assert oya_pretooluse.classify_repo_read("python x.py") == (False, "")
+
+
+class TestRepoReadOptInGating:
+    """classify_bash only auto-approves a repo-scoped read under the opt-in."""
+
+    def _run(self, command, opt_in):
+        if opt_in:
+            os.environ["MUSUBI_REPO_HAS_NO_SECRETS"] = "true"
+        else:
+            os.environ.pop("MUSUBI_REPO_HAS_NO_SECRETS", None)
+        try:
+            return oya_pretooluse.classify_bash(command)
+        finally:
+            os.environ.pop("MUSUBI_REPO_HAS_NO_SECRETS", None)
+
+    def test_in_repo_read_defers_without_opt_in(self):
+        ok, reason = self._run("cat src/app.ts", opt_in=False)
+        assert ok is False
+        assert "repo_has_no_secrets" in reason
+
+    def test_in_repo_read_allows_with_opt_in(self):
+        ok, reason = self._run("cat src/app.ts", opt_in=True)
+        assert ok is True
+        assert "opt-in enabled" in reason
+
+    def test_out_of_repo_read_defers_even_with_opt_in(self):
+        ok, _ = self._run("cat ~/.ssh/id_rsa", opt_in=True)
+        assert ok is False   # path-scope beats the opt-in
+
+    @pytest.mark.parametrize("cmd", [
+        'cat "/etc/passwd"',
+        "cat '/etc/passwd'",
+        'cat "~/.ssh/config"',
+    ])
+    def test_quoted_out_of_repo_read_defers_even_with_opt_in(self, cmd):
+        ok, _ = self._run(cmd, opt_in=True)
+        assert ok is False, f"{cmd!r} escapes the repo via a quote — must defer"
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat .env",
+    "cat config/.env.production",
+    "cat certs/server.key",
+    "tail deploy.pem",
+    "cat ~/.ssh/id_rsa",
+    "rg token src/id_rsa",
+])
+def test_secret_targets_never_scoped(cmd):
+    # Secret-bearing basenames (or out-of-repo) must NOT auto-scope even though
+    # the path is repo-relative — repo_has_no_secrets covers source, not secrets.
+    ok, _ = oya_pretooluse.classify_repo_read(cmd)
+    assert ok is False, f"{cmd!r} is secret-bearing/unsafe — must not scope"

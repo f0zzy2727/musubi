@@ -6,6 +6,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Repo-scoped orientation reads auto-approve under the disclosure opt-in
+  (`perm-1`).** The agents' per-session boot orientation (`sed -n`/`tail`/`head`/
+  `cat`/`nl`/`rg`/`grep` over project files) was the single biggest source of
+  permission-prompt friction — deferred every session because content-reads can
+  leak secrets (sec-1). The PreToolUse hook now auto-approves these under the
+  existing `[security].repo_has_no_secrets` opt-in, but ONLY when every path
+  argument is repo-relative AND not a secret-bearing filename — an out-of-repo
+  read (`cat ~/.ssh/id_rsa`), a `..` traversal, or a secret basename (`.env`,
+  `*.key`, `*.pem`, `id_rsa`, …) still defers even with the opt-in. A strictly
+  tighter guarantee than the old blanket exclusion, with the daily friction
+  removed for opted-in beds. `sed` is gated to the read-print form (`-n`, never
+  `-i`).
+
 ## [0.3.0] - 2026-06-24
 
 Operational-reliability + safety release. The headline is the **stall watchdog**:

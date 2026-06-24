@@ -151,11 +151,16 @@ session_name = "musubi"                  # tmux session name — change if runni
 
 # --- Optional: [security] block --------------------------------------------
 # repo_has_no_secrets re-enables auto-approval of the content/config-disclosing
-# read commands (`git show`/`diff`/`log`/`config`/`remote`/`blame`) that the
-# PreToolUse hook defers by default. Set it ONLY if this repo contains nothing
+# read commands (`git show`/`diff`/`log`/`config`/`remote`/`blame`) AND the
+# agents' boot orientation reads (`sed -n`/`tail`/`head`/`cat`/`nl`/`rg`/`grep`)
+# that the PreToolUse hook defers by default — the single biggest source of
+# per-session permission friction. Set it ONLY if this repo contains nothing
 # you'd mind a read disclosing (no tracked .env, no credential-bearing git
 # config/remotes, no secrets in history). Leaving it unset is the safe default.
-# Bare-`$` env expansion and `cat`/`printenv` are NEVER re-enabled by this flag.
+# Even WITH the opt-in, an orientation read still defers when its target is
+# out-of-repo (absolute/`~`/`..`) or a secret-bearing filename (`.env`, `*.key`,
+# `*.pem`, `id_rsa`, …). Bare-`$` env expansion and `printenv`/`env` are NEVER
+# re-enabled by this flag.
 #
 # Surfaced to the hook via the MUSUBI_REPO_HAS_NO_SECRETS env var; you can also
 # export that directly in your shell before launch.

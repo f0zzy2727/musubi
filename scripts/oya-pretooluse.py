@@ -115,13 +115,97 @@ DISCLOSE_PATTERNS = tuple(
     )
 )
 # DELIBERATELY NOT auto-approved at all (no opt-in re-enables these):
-#   cat / head / tail  — disclose arbitrary file *contents* at any path
-#                        (`cat ~/.ssh/id_rsa`, `cat .env`). Normal reads route
-#                        through the path-scoped Read tool.
 #   printenv / env     — dump the environment, including exported API keys.
 #   echo               — removed (was auto-approved): near-zero benefit and the
 #                        cleanest env-expansion vector (`echo $TOKEN`). With `$`
 #                        now fenced it would be inert anyway, but it earns nothing.
+
+
+# --- Repo-scoped orientation reads (2026-06-24) ------------------------------
+# The single biggest source of per-session permission friction is the agents'
+# boot orientation: they hammer `sed -n`, `tail`, `head`, `cat`, `nl`, `rg`,
+# `grep` over project files every session, all deferred to a prompt. These read
+# file CONTENT, so sec-1 rightly keeps them off the unconditional allowlist —
+# but `cat ~/.ssh/id_rsa` and `cat src/app.ts` are NOT the same risk. The danger
+# is an ARBITRARY-path read; an in-repo read under a repo that has declared it
+# holds no secrets is exactly what `[security].repo_has_no_secrets` already
+# asserts. So: auto-approve these reads ONLY when (a) the opt-in is set AND
+# (b) every path argument is repo-RELATIVE (no leading `/` or `~`, no `..`
+# traversal). An absolute/home/parent path still defers even under the opt-in —
+# a strictly tighter guarantee than the old blanket exclusion, with the daily
+# friction removed for opted-in beds.
+REPO_READ_TOOLS = frozenset({
+    "cat", "head", "tail", "nl", "rg", "grep", "less", "more",
+})
+
+
+# Filenames that are secret-bearing even inside a repo. `repo_has_no_secrets`
+# asserts the SOURCE holds no secrets — it never licenses reading these. Matched
+# on the basename so a path prefix can't smuggle them in.
+_SECRET_BASENAME_RE = re.compile(
+    r"(?i)(^\.env($|\.)|(^|\.)(pem|key|p12|pfx|keystore|jks)$|"
+    r"^(id_rsa|id_ed25519|id_dsa|id_ecdsa)$|^\.?(npmrc|netrc|pgpass|htpasswd)$|"
+    r"credentials?$|secrets?($|\.))")
+
+
+def _is_unsafe_read_token(token: str) -> bool:
+    """True if a token denotes a path we must not auto-approve reading: one that
+    could escape the repo root (absolute / home / `..`), OR a secret-bearing
+    filename even inside the repo (`.env`, `*.key`, `id_rsa`, …)."""
+    # Strip surrounding quotes FIRST: a leading quote (`cat "/etc/passwd"`) must
+    # not mask an absolute/home path from the repo-escape check below. The
+    # metachar fence has already removed `$`/backtick/pipe, so quotes here are
+    # only path delimiters, never expansion vectors.
+    token = token.strip("'\"")
+    if token.startswith(("/", "~")):
+        return True
+    segments = token.split("/")
+    if ".." in segments:
+        return True
+    basename = segments[-1].strip("'\"")
+    return bool(_SECRET_BASENAME_RE.search(basename))
+
+
+def classify_repo_read(command: str) -> tuple[bool, str]:
+    """Return (is_repo_scoped_read, reason). True only for a content-read tool
+    whose every path argument stays inside the repo. Pure; the metachar fence in
+    classify_bash has already guaranteed no pipe/redirect/`$`/subshell, so a
+    plain whitespace split is a safe tokeniser here."""
+    parts = command.split()
+    if not parts:
+        return False, ""
+    tool = parts[0]
+    if tool not in REPO_READ_TOOLS:
+        return False, ""
+    # sed is a special case: only the read-and-print form, never in-place edit.
+    if tool == "sed":
+        return False, ""  # handled by the explicit sed clause below
+    for tok in parts[1:]:
+        if tok.startswith("-"):
+            continue  # a flag, not a path
+        if _is_unsafe_read_token(tok):
+            return False, f"unsafe read target (outside repo or secret-bearing): {tok}"
+    return True, f"repo-scoped content read ({tool})"
+
+
+def classify_sed_read(command: str) -> tuple[bool, str]:
+    """`sed -n '<range>p' <file>` is the agents' most-used orientation read.
+    Auto-approvable only as the non-mutating read-print form (`-n`, never `-i`)
+    over a repo-relative file."""
+    parts = command.split()
+    if not parts or parts[0] != "sed":
+        return False, ""
+    if any(p == "-i" or p.startswith("-i") for p in parts):
+        return False, "sed -i edits in place"
+    if "-n" not in parts:
+        return False, "sed without -n is not a plain read"
+    for tok in parts[1:]:
+        if tok.startswith("-"):
+            continue
+        # Quoted ranges/scripts (e.g. '1,5p') carry no path separator and stay.
+        if _is_unsafe_read_token(tok):
+            return False, f"sed reads an unsafe target (outside repo or secret-bearing): {tok}"
+    return True, "repo-scoped sed read (-n)"
 
 
 # --- Blast-radius gate (blast-1, 2026-06-24) ---------------------------------
@@ -246,6 +330,21 @@ def classify_bash(command: str) -> tuple[bool, str]:
             return False, (
                 "discloses file content or config; deferred by default "
                 f"(set [security].repo_has_no_secrets to opt in): {pattern.pattern}"
+            )
+    # Repo-scoped orientation reads (sed -n / tail / head / cat / nl / rg / grep
+    # of an in-repo path). Same disclosure opt-in as above, plus a path-scope
+    # check so an out-of-repo read still defers even under the opt-in.
+    for is_read, rr_reason in (classify_sed_read(command),
+                               classify_repo_read(command)):
+        if is_read:
+            if _disclosure_opt_in():
+                return True, (
+                    "repo-scoped read; disclosure opt-in enabled "
+                    f"([security].repo_has_no_secrets): {rr_reason}"
+                )
+            return False, (
+                "repo-scoped read; deferred by default "
+                f"(set [security].repo_has_no_secrets to opt in): {rr_reason}"
             )
     return False, "no tier-1 read-only pattern matched"
 
