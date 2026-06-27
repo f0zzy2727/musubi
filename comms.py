@@ -358,6 +358,34 @@ def silence_nudge_due(idle_secs, idle_wake_secs, silence_nudges,
     return silence_nudges == 0 or since_last_nudge >= idle_wake_secs
 
 
+def rotation_due(current_size, last_offset, idle_secs, max_bytes, quiet_secs):
+    """Decide whether the watcher should roll the active comms file to an archive
+    now (relay-1). Pure predicate so the watcher loop's decision is testable.
+
+    Rotation keeps `active.txt` from growing unbounded across a long session —
+    the bloat that otherwise forces a manual orchestrator "bounce". It is SAFE
+    only at a fully-drained boundary:
+
+      - `current_size == last_offset` — everything written has been relayed AND
+        there is no mid-compose partial (the drain advances `last_offset` only
+        past complete `<OVER>` blocks, so a trailing partial leaves
+        `last_offset < current_size`). Archiving here cannot orphan a tail the
+        way an externally-timed bounce/truncate can.
+      - `current_size >= max_bytes` — only roll a file that has actually grown.
+      - `idle_secs >= quiet_secs` — the channel has been quiet, so we don't
+        split a live exchange across two archive files.
+
+    `max_bytes <= 0` disables rotation entirely.
+    """
+    if max_bytes <= 0:
+        return False
+    if current_size != last_offset:
+        return False
+    if current_size < max_bytes:
+        return False
+    return idle_secs >= quiet_secs
+
+
 def comms_drop_due(armed_secs, baton_grace_secs, append_since_arm,
                    already_surfaced, waiting_on_operator):
     """Decide whether the comms-drop watchdog (stall-class 2) should surface now.

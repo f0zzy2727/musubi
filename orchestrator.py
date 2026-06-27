@@ -36,6 +36,7 @@ from comms import (
     is_idle_result,
     silence_nudge_due,
     comms_drop_due,
+    rotation_due,
     is_state_affecting,
     capsule_path,
     capsule_is_stale,
@@ -1347,6 +1348,15 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     last_size_seen = last_offset
     last_growth_time = time.time()
     nudged_at_size = None
+    # Rolling rotation (relay-1, 2026-06-27): keep active.txt from growing
+    # unbounded across a long session — the bloat that otherwise forces a manual
+    # orchestrator "bounce". The watcher itself archives + resets at a fully-
+    # drained, quiet boundary (see the rotation_due call below), so it can never
+    # orphan a mid-compose tail the way an externally-timed truncate can.
+    # rotate_max_bytes = 0 disables.
+    rotate_max_bytes = cfg.get("comms", {}).get("rotate_max_bytes", 200_000)
+    rotate_quiet_secs = cfg.get("comms", {}).get("rotate_quiet_seconds", 60)
+    _rotate_archive_dir = resolve_archive_dir(cfg)
     # Count consecutive idle messages to break ack-of-ack chains: when both
     # agents repeatedly post "NOT STARTED / holding / awaiting" without a
     # state transition, the orchestrator stops relaying after the third one
@@ -2107,13 +2117,45 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                 silence_nudges = 0  # new activity — re-arm the silence watchdog
 
             if current_size == last_offset:
-                # Everything written has been relayed. Run the silence watchdog
-                # (idle-1): if the channel stays quiet past idle_wake_secs and
-                # nothing is correctly waiting on the operator, wake the
-                # orchestration layer so the pair doesn't sleep until poked.
+                # Everything written has been relayed — the one boundary where no
+                # mid-compose partial exists (a trailing partial leaves
+                # last_offset < current_size). This is where two things run:
+                now = time.time()
+                idle = now - last_growth_time
+
+                # (relay-1) Rolling rotation: if active.txt has grown past
+                # rotate_max_bytes and the channel has been quiet, archive + reset
+                # it IN the watcher (no re-drain) so it never grows unbounded and
+                # never needs a manual bounce. Safe here precisely because we are
+                # fully drained — the archive+truncate cannot orphan a tail.
+                if rotation_due(current_size, last_offset, idle,
+                                rotate_max_bytes, rotate_quiet_secs):
+                    try:
+                        rotated = archive_and_reset_comms(comms_file, _rotate_archive_dir)
+                    except (OSError, RuntimeError) as e:
+                        rotated = None
+                        _log("WATCHER", f"comms rolling-rotation skipped (kept file): {e}")
+                    if rotated:
+                        _log("WATCHER", f"comms rolling-rotation: {current_size:,}B "
+                                        f">= {rotate_max_bytes:,}B, quiet {idle:.0f}s — "
+                                        f"archived to {rotated}, reset to 0 bytes.")
+                        last_offset = 0
+                        last_size_seen = 0
+                        last_growth_time = now
+                        nudged_at_size = None
+                        unparseable_at_size = None
+                        silence_nudges = 0
+                        # The baton (comms-drop) watchdog keys on comms size — the
+                        # capsule is untouched by a rotation, so just re-baseline.
+                        _baton_armed_at = None
+                        _baton_size_at_arm = None
+                        _baton_surfaced = False
+                        continue
+
+                # Silence watchdog (idle-1): if the channel stays quiet past
+                # idle_wake_secs and nothing is correctly waiting on the operator,
+                # wake the orchestration layer so the pair doesn't sleep.
                 if idle_wake_secs > 0:
-                    now = time.time()
-                    idle = now - last_growth_time
                     waiting_on_operator = bool(oa_active and oa_status_text)
                     if silence_nudge_due(idle, idle_wake_secs, silence_nudges,
                                          now - last_silence_nudge_time,

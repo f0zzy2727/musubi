@@ -52,6 +52,13 @@ operating_model = "docs/agents/PAIR_OPERATING_MODEL.md"  # rationale + adoption 
 #                                                        # append follows this long (a dropped relay baton — a verdict that never
 #                                                        # relayed, the S3/S4 field bug). 0 disables.
 #                                                        # NOTE: permission-modal detection (stall-class 1) is always on — no knob.
+# rotate_max_bytes = 200000                              # rolling comms rotation (relay-1): when active.txt grows past this many
+#                                                        # bytes AND the channel is fully drained AND quiet for rotate_quiet_seconds,
+#                                                        # the watcher archives it (archive/agent_comms_<date>_*.txt) and resets to 0
+#                                                        # — no manual orchestrator "bounce" needed, no orphan-tail risk (it only
+#                                                        # rotates at a drained boundary, never mid-message). 0 disables.
+# rotate_quiet_seconds = 60                              # how long the channel must be quiet before a rolling rotation fires, so a
+#                                                        # live exchange is never split across two archive files.
 
 [tmux]
 session_name = "musubi"                  # tmux session name — change if running multiple sessions

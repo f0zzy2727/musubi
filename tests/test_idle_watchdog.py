@@ -326,3 +326,33 @@ def test_comms_drop_disabled_when_grace_zero():
     assert comms_drop_due(
         armed_secs=10_000, baton_grace_secs=0, append_since_arm=False,
         already_surfaced=False, waiting_on_operator=False) is False
+
+
+# --- rolling comms rotation (relay-1, 2026-06-27) ---------------------------
+from comms import rotation_due
+
+MAXB = 200_000
+QUIET = 60
+
+
+def test_rotation_fires_when_drained_big_and_quiet():
+    assert rotation_due(MAXB, MAXB, QUIET, MAXB, QUIET) is True
+    assert rotation_due(MAXB + 5_000, MAXB + 5_000, QUIET + 10, MAXB, QUIET) is True
+
+
+def test_rotation_holds_when_not_fully_drained():
+    # A partial (mid-compose) leaves current_size > last_offset — never rotate,
+    # or the truncate would orphan the tail.
+    assert rotation_due(MAXB + 100, MAXB, QUIET, MAXB, QUIET) is False
+
+
+def test_rotation_holds_below_threshold():
+    assert rotation_due(MAXB - 1, MAXB - 1, QUIET, MAXB, QUIET) is False
+
+
+def test_rotation_holds_when_not_quiet_long_enough():
+    assert rotation_due(MAXB, MAXB, QUIET - 1, MAXB, QUIET) is False
+
+
+def test_rotation_disabled_when_max_bytes_zero():
+    assert rotation_due(10_000_000, 10_000_000, 10_000, 0, QUIET) is False
