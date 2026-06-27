@@ -274,6 +274,33 @@ def parse_context_pressure_k(buffer):
     return best
 
 
+def context_regime(pressure_k, warn_k, pane_state, frozen_secs, idle_threshold):
+    """Map a context-pressure reading to the operator-action regime. Pure +
+    unit-testable. Returns one of:
+
+      None   — below threshold / no reading: nothing to surface.
+      "live" — heavy but still recoverable. The remedy is `/compact` (or `/clear`
+               at a clean boundary): it frees context and CONTINUES the session,
+               no restart needed. This is the common case and what the operator
+               usually wants instead of a restart.
+      "dead" — heavy AND frozen-idle past the park threshold: the pane has very
+               likely already died of context exhaustion. `/compact` can't revive
+               a dead pane; only a relaunch (re-attach) recovers it.
+
+    A pane only reads "dead" when it is BOTH idle (not WORKING, not at a modal /
+    pending input — those are live, transient states) AND its buffer has not
+    changed for at least `idle_threshold` seconds (the same park-stall threshold).
+    A healthy heavy pane cycles work→idle→work, so its buffer keeps changing and
+    `frozen_secs` stays low → "live". `idle_threshold <= 0` (park disabled) means
+    we can't judge frozen-ness, so we never declare "dead" — always "live"."""
+    if pressure_k is None or pressure_k < warn_k:
+        return None
+    if idle_threshold and idle_threshold > 0 and pane_state == "IDLE" \
+            and frozen_secs >= idle_threshold:
+        return "dead"
+    return "live"
+
+
 def quarantine_log_path(comms_file):
     """The single append-only quarantine log beside the comms file. Replaces the
     old one-file-per-incident sidecars (`_unparseable_<timestamp>.txt`) that
@@ -1571,15 +1598,27 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     _tick_count = 0
     _staleness_warned = False
 
-    # Context-budget watchdog (2026-06-22). A heavy implementer session stalls or
-    # dies once its context fills; a nudge can't recover it, only a human restart
-    # can. Watch each coder pane for the "/clear to save <N>k tokens" pressure
-    # hint and surface an operator warning BEFORE death. Threshold in thousands
-    # of tokens; [comms].context_warn_k = 0 disables. Warned-once per pane until
-    # the pressure clears (a /clear or restart drops the figure back down).
+    # Context-budget watchdog (2026-06-22; dead-vs-live split 2026-06-27). A heavy
+    # implementer session slows, then dies once its context fills. Watch each
+    # coder pane for the "/clear to save <N>k tokens" pressure hint and surface an
+    # operator warning. The remedy depends on whether the pane is still LIVE or
+    # already DEAD (see context_regime):
+    #   - live  -> recommend `/compact` (frees context, CONTINUES the session; no
+    #              restart). This is the common case — the operator does NOT need
+    #              to restart a heavy-but-running pane.
+    #   - dead  -> recommend relaunch (a /compact can't recover a context-dead
+    #              pane). Only reached when the pane is idle AND frozen past the
+    #              park threshold.
+    # Threshold in thousands of tokens; [comms].context_warn_k = 0 disables.
+    # Warned-once per pane until the pressure clears (a /compact/clear/relaunch
+    # drops the figure back down); a live->dead transition re-surfaces once so a
+    # pane that dies after the first /compact nudge still escalates to relaunch.
     context_warn_k = cfg.get("comms", {}).get("context_warn_k", 400)
     CONTEXT_CHECK_EVERY = 10  # ticks (~30s at 3s/tick)
     _context_warned = {"Opus": False, "Coda": False}
+    _context_regime = {"Opus": None, "Coda": None}   # last surfaced: None/live/dead
+    _context_last_buf = {"Opus": None, "Coda": None}  # for the freeze (dead) test
+    _context_frozen_since = {"Opus": time.time(), "Coda": time.time()}
 
     # Permission-modal watchdog (stall-class 1, 2026-06-24). A relay-dependent
     # pane blocked on a permission/approval modal is silent — no event fires and
@@ -1772,20 +1811,51 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
             # capture every ~30s, not every tick.
             if context_warn_k > 0 and _tick_count % CONTEXT_CHECK_EVERY == 0:
                 for pane, label in ((p_claude, "Opus"), (p_codex, "Coda")):
-                    pressure = parse_context_pressure_k(capture_pane(pane, lines=12))
-                    if pressure is not None and pressure >= context_warn_k:
-                        if not _context_warned[label]:
+                    # Capture enough lines to BOTH read the pressure hint and
+                    # classify the pane state (modal/working markers sit in the
+                    # tail too). 40 mirrors capture_pane's default.
+                    buf = capture_pane(pane, lines=40)
+                    pressure = parse_context_pressure_k(buf)
+                    now = time.time()
+                    # Freeze tracker for the dead test: a pane whose tail keeps
+                    # changing (spinner/timer/new output) is alive; one frozen
+                    # past the park threshold while idle is very likely dead.
+                    if buf != _context_last_buf[label]:
+                        _context_last_buf[label] = buf
+                        _context_frozen_since[label] = now
+                    frozen_secs = now - _context_frozen_since[label]
+                    regime = context_regime(
+                        pressure, context_warn_k, classify_pane_state(buf),
+                        frozen_secs, pane_idle_secs)
+                    if regime is not None:
+                        # Surface on first warn OR on a live->dead escalation, so a
+                        # pane that dies after the first /compact nudge still gets
+                        # the relaunch message. dead->live is not re-surfaced.
+                        escalated = (_context_regime[label] == "live"
+                                     and regime == "dead")
+                        if not _context_warned[label] or escalated:
                             _context_warned[label] = True
-                            _surface_refusal(
-                                f"context-budget-{label.lower()}",
-                                f"{label} pane is at ~{pressure:.0f}k tokens "
-                                f"(>= {context_warn_k}k) — refresh it (/compact or "
-                                f"/clear, or relaunch) at the next clean boundary "
-                                f"BEFORE it stalls. A nudge can't recover a "
-                                f"context-dead pane; state is safe on disk/capsule.")
+                            _context_regime[label] = regime
+                            guard = f"context-budget-{label.lower()}"
+                            head = (f"{label} pane is at ~{pressure:.0f}k tokens "
+                                    f"(>= {context_warn_k}k)")
+                            if regime == "dead":
+                                _surface_refusal(guard,
+                                    f"{head} and has been idle/frozen ~{frozen_secs:.0f}s "
+                                    f"— likely context-DEAD. /compact can't recover a "
+                                    f"dead pane; relaunch it (re-attach). State is safe "
+                                    f"on disk/capsule, so a fresh pane resumes from there.")
+                            else:
+                                _surface_refusal(guard,
+                                    f"{head} but still LIVE. Run /compact in its pane at "
+                                    f"the next clean boundary — it frees context and "
+                                    f"CONTINUES the session (no restart). /clear only at a "
+                                    f"clean boundary; relaunch only if it later goes "
+                                    f"unresponsive. State is safe on disk/capsule.")
                             _log("WATCHER", f"context watchdog: {label} at "
-                                            f"~{pressure:.0f}k tokens — warned operator.")
-                    elif pressure is None or pressure < context_warn_k:
+                                            f"~{pressure:.0f}k tokens, regime={regime} "
+                                            f"— warned operator.")
+                    else:
                         # Pressure cleared (refresh/restart) — re-arm the warning
                         # so a fresh climb past the threshold warns again. Also
                         # clear the refusal-notify state for this guard, else
@@ -1796,6 +1866,7 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                             refusal_counts.pop(guard, None)
                             _pin_status()
                         _context_warned[label] = False
+                        _context_regime[label] = None
 
             # Oya pane: lazy discovery — keep trying until found, then cache.
             if oya_active and p_oyakata is None:

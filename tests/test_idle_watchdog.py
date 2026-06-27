@@ -126,6 +126,45 @@ def test_no_pressure_hint_returns_none():
     assert parse_context_pressure_k(None) is None
 
 
+# --- context_regime: dead-vs-live remedy split (2026-06-27) ------------------
+from orchestrator import context_regime
+
+WARN = 400
+IDLE_T = 240
+
+
+def test_regime_none_below_threshold():
+    assert context_regime(399, WARN, "IDLE", 9999, IDLE_T) is None
+    assert context_regime(None, WARN, "IDLE", 9999, IDLE_T) is None
+
+
+def test_regime_live_when_working_however_heavy():
+    # A working pane is never "dead", no matter how long the timer ran.
+    assert context_regime(898, WARN, "WORKING", 9999, IDLE_T) == "live"
+
+
+def test_regime_live_when_idle_but_not_frozen_long():
+    # Heavy + idle but the buffer changed recently -> still cycling -> live.
+    assert context_regime(720, WARN, "IDLE", IDLE_T - 1, IDLE_T) == "live"
+
+
+def test_regime_dead_when_idle_and_frozen_past_threshold():
+    assert context_regime(720, WARN, "IDLE", IDLE_T, IDLE_T) == "dead"
+    assert context_regime(720, WARN, "IDLE", IDLE_T + 100, IDLE_T) == "dead"
+
+
+def test_regime_modal_or_pending_is_live_not_dead():
+    # A long-frozen MODAL/PENDING_INPUT pane is the modal watchdog's job — it is
+    # a live transient state, never context-dead.
+    assert context_regime(720, WARN, "MODAL", 9999, IDLE_T) == "live"
+    assert context_regime(720, WARN, "PENDING_INPUT", 9999, IDLE_T) == "live"
+
+
+def test_regime_never_dead_when_park_disabled():
+    # idle_threshold <= 0 means we can't judge frozen-ness -> always live.
+    assert context_regime(898, WARN, "IDLE", 9999, 0) == "live"
+
+
 # --- permission-modal watchdog (stall-class 1, 2026-06-24) -------------------
 from orchestrator import buffer_has_permission_modal
 
