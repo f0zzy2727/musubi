@@ -222,3 +222,96 @@ def test_git_head_helpers_on_repo():
 def test_git_head_helpers_non_repo_return_none(tmp_path):
     assert _git_head_sha(str(tmp_path)) is None
     assert _git_head_summary(str(tmp_path)) is None
+
+
+# --- docs-2: capsule-aware trim + boot auto-rotate --------------------------
+from orchestrator import trim_capsule, auto_rotate_managed_docs
+import pathlib
+
+
+def _write_bloated_capsule(tmp_path, n_entries=18, entry_chars=3000):
+    """A capsule shaped like the field one: header + invariant + HEAD pointer +
+    many freeform **bold** log entries + a couple `## ` structured sections."""
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    parts = [
+        "# Current State\n",
+        "> Capsule-before-comms invariant note.\n",
+        "**Last verified HEAD:** abc1234 (the current commit pointer)\n",
+    ]
+    for i in range(n_entries):
+        parts.append(f"**Old log entry {i} (2026-06-13):** " + "x" * entry_chars + "\n")
+    parts.append("**Active cycle:** stage-7 build\n")
+    parts.append("\n## Active slices\n\n| Agent | Slice |\n|---|---|\n| Opus | S1 |\n")
+    parts.append("\n## Locked decisions this session\n\n| Decision |\n|---|\n| keep X |\n")
+    cap = agents / "current-state.md"
+    cap.write_text("".join(parts))
+    return cap
+
+
+def test_trim_capsule_keeps_skeleton_drops_log_bulk(tmp_path):
+    cap = _write_bloated_capsule(tmp_path)
+    orig = cap.read_text()
+    result = trim_capsule(cap, keep_recent_entries=2)
+    assert result is not None
+    archive, new_size = result
+    # Full original archived losslessly.
+    assert pathlib.Path(archive).read_text() == orig
+    new = cap.read_text()
+    # Shrunk hard.
+    assert new_size < len(orig) // 5
+    # Orientation skeleton PRESERVED (not blanked — the anti-amnesia guarantee).
+    assert "**Last verified HEAD:** abc1234" in new
+    assert "**Active cycle:** stage-7 build" in new
+    assert "## Active slices" in new
+    assert "## Locked decisions this session" in new
+    assert "| Opus | S1 |" in new
+    # Most-recent entries kept; the old bulk dropped.
+    assert "Old log entry 17" in new
+    assert "Old log entry 16" in new
+    assert "Old log entry 0" not in new
+    assert "Old log entry 5" not in new
+
+
+def test_trim_capsule_none_when_no_freeform_bulk(tmp_path):
+    # A clean capsule (no freeform log entries to drop) -> nothing to trim.
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True)
+    cap = agents / "current-state.md"
+    cap.write_text("# Current State\n**Last verified HEAD:** abc\n\n## Active slices\n\n| a |\n")
+    assert trim_capsule(cap) is None
+
+
+def test_auto_rotate_trims_capsule_and_rotates_handoff(tmp_path):
+    cap = _write_bloated_capsule(tmp_path)
+    _write_handoff(tmp_path, n_sections=5, section_chars=30_000)
+    cfg = {"comms": {}, "project": {"path": str(tmp_path)}}
+    rotated = auto_rotate_managed_docs(cfg)
+    labels = {r[0] for r in rotated}
+    assert "capsule" in labels and "agent-handoff" in labels
+    # Capsule trimmed (skeleton survives), handoff rotated — both now small.
+    assert "**Last verified HEAD:** abc1234" in cap.read_text()
+    assert (tmp_path / "docs/agents/current-state.md").stat().st_size < MANAGED_DOC_WARN_CHARS
+    assert (tmp_path / "docs/agents/agent-handoff.md").stat().st_size < MANAGED_DOC_REFUSE_CHARS
+
+
+def test_auto_rotate_respects_off_switch(tmp_path):
+    _write_bloated_capsule(tmp_path)
+    cfg = {"comms": {"auto_rotate_managed_docs": False}, "project": {"path": str(tmp_path)}}
+    assert auto_rotate_managed_docs(cfg) == []
+
+
+def test_auto_rotate_skips_small_docs(tmp_path):
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "current-state.md").write_text("# Current State\n**Last verified HEAD:** abc\n")
+    cfg = {"comms": {}, "project": {"path": str(tmp_path)}}
+    assert auto_rotate_managed_docs(cfg) == []
+
+
+def test_auto_rotate_leaves_claude_md_alone(tmp_path):
+    # CLAUDE.md is reference, not a cycle log — never auto-rotated even when huge.
+    (tmp_path / "CLAUDE.md").write_text("x" * (MANAGED_DOC_WARN_CHARS + 5000))
+    cfg = {"comms": {}, "project": {"path": str(tmp_path)}}
+    assert auto_rotate_managed_docs(cfg) == []
+    assert (tmp_path / "CLAUDE.md").stat().st_size > MANAGED_DOC_WARN_CHARS  # untouched

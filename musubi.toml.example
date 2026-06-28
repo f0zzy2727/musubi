@@ -59,8 +59,12 @@ operating_model = "docs/agents/PAIR_OPERATING_MODEL.md"  # rationale + adoption 
 #                                                        # rotates at a drained boundary, never mid-message). 0 disables.
 # rotate_quiet_seconds = 60                              # how long the channel must be quiet before a rolling rotation fires, so a
 #                                                        # live exchange is never split across two archive files.
-
-[tmux]
+# auto_rotate_managed_docs = true                        # boot auto-hygiene (docs-2): on each clean launch, archive + trim any cycle
+#                                                        # doc (capsule / handoff / todo) grown past managed_doc_rotate_chars, so the
+#                                                        # pair never warm-starts from a bloated multi-week log (the recurring "Oya
+#                                                        # lost context / spaghetti" failure). Archive-safe (full copy kept); the
+#                                                        # capsule is TRIMMED to its skeleton, never blanked. false = manual only.
+# managed_doc_rotate_chars = 40000                       # size over which the boot auto-rotation acts (defaults to the warn level).
 session_name = "musubi"                  # tmux session name — change if running multiple sessions
 
 # --- Optional: orchestrator boot guards -------------------------------------

@@ -673,6 +673,131 @@ def reset_capsule(path):
     return archive_path
 
 
+# Capsule lines that carry CURRENT-state orientation and must survive a trim —
+# the commit pointer + freshness stamp + active-cycle name. Everything else that
+# starts with `**` is a freeform log entry (the bloat).
+_CAPSULE_KEEP_PREFIXES = ("**Last verified HEAD:", "**Last updated:",
+                          "**Active cycle:")
+
+
+def trim_capsule(path, keep_recent_entries=2):
+    """Archive the full capsule, then rewrite it KEEPING its orientation skeleton
+    and dropping the freeform `**bold**` log entries that bloat it.
+
+    Unlike reset_capsule (which blanks to a template — the agents warm-start with
+    NO idea what they were doing, the amnesia failure), this preserves the parts
+    that actually orient the pair:
+      - the `# ` header + the capsule-invariant blockquote,
+      - the `**Last verified HEAD:**` / `**Last updated:**` / `**Active cycle:**`
+        lines (the current pointer),
+      - the most-recent `keep_recent_entries` freeform entries (what just
+        happened), and
+      - ALL `## ` structured sections (Active slices / Blocked / Locked-decisions
+        tables — the real current state).
+    The older freeform entries go to the archive (recoverable).
+
+    Returns (archive_path, new_size), or None when there is no freeform bulk to
+    drop (the bloat isn't log entries — let the size guard handle it; a blank
+    reset is never done automatically)."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    # The `## ` structured sections ARE current state — keep them whole.
+    m = re.search(r"^## ", text, re.MULTILINE)
+    preamble, sections = (text[:m.start()], text[m.start():]) if m else (text, "")
+
+    kept_pre, freeform = [], []
+    for line in preamble.splitlines():
+        s = line.strip()
+        if s.startswith("# ") or s.startswith(">") or s.startswith(_CAPSULE_KEEP_PREFIXES):
+            if s:
+                kept_pre.append(line)
+        elif s.startswith("**"):
+            freeform.append(line)
+        # else: blank / unknown prose between entries — drop (it's in the archive)
+
+    # Nothing to gain if the freeform log isn't the bulk.
+    if len(freeform) <= keep_recent_entries:
+        return None
+
+    archive_dir = os.path.join(os.path.dirname(path), "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    archive_path = os.path.join(archive_dir, f"{stem}-archive-{stamp}.md")
+    if os.path.exists(archive_path):
+        archive_path = os.path.join(
+            archive_dir, f"{stem}-archive-{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.md")
+    shutil.copy2(path, archive_path)  # archive FULL before any rewrite
+
+    recent = freeform[-keep_recent_entries:] if keep_recent_entries > 0 else []
+    when = datetime.now().strftime("%Y-%m-%d %H:%M")
+    pointer = (
+        f"\n---\n\n> **Auto-trimmed {when} (boot managed-doc hygiene).** "
+        f"{len(freeform) - len(recent)} older capsule log entries archived to "
+        f"`docs/agents/archive/{os.path.basename(archive_path)}` — kept the current "
+        f"HEAD, the {len(recent)} most-recent entries, and the structured sections. "
+        f"The capsule is a snapshot, not a log.\n"
+    )
+    recent_block = ("\n\n" + "\n".join(recent)) if recent else ""
+    body = "\n".join(kept_pre) + recent_block + "\n\n" + sections.rstrip() + "\n" + pointer
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    return archive_path, os.path.getsize(path)
+
+
+# Managed docs the boot auto-rotation may trim. CLAUDE.md / runbook are
+# deliberately excluded — they are reference docs, not cycle logs (CLAUDE.md
+# needs the @-import split, not rotation), and the size guard still warns on them.
+_AUTO_ROTATABLE = frozenset({"capsule", "agent-handoff", "agent-todo"})
+
+
+def auto_rotate_managed_docs(cfg):
+    """Boot auto-hygiene (docs-2): non-interactively archive + trim any cycle doc
+    grown past the rotate threshold, so warm-start context stays cheap WITHOUT the
+    operator having to remember to rotate at cycle close. This is the durable fix
+    for the recurring 'Oya lost context / 15-min spaghetti' failure — a capsule /
+    handoff that silently bloated into a multi-week log.
+
+    Default-ON; archive-safe (the full doc is copied to the archive before any
+    trim). The capsule is TRIMMED (trim_capsule — keeps the orientation skeleton),
+    never blanked; handoff/todo are rotated to their most-recent dated cycle
+    sections (rotate_managed_doc). Returns [(label, old, new, archive), ...] for
+    the operator log. Runs before check_managed_doc_sizes, which stays as the
+    refuse-on-launch backstop for anything auto-rotation can't shrink."""
+    comms = cfg.get("comms", {})
+    if not comms.get("auto_rotate_managed_docs", True):
+        return []
+    threshold = comms.get("managed_doc_rotate_chars", MANAGED_DOC_WARN_CHARS)
+
+    rotated = []
+    for label, path in _managed_doc_paths(cfg):
+        if label not in _AUTO_ROTATABLE:
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size <= threshold:
+            continue
+        try:
+            result = trim_capsule(path) if label == "capsule" else rotate_managed_doc(path)
+        except (OSError, RuntimeError) as e:
+            _log("BOOT", f"auto-rotate skipped {label} ({e}); left as-is.")
+            continue
+        if result is None:
+            _log("BOOT", f"auto-rotate: {label} is {size:,} chars but has no "
+                         f"rotatable structure — left as-is (the size guard will "
+                         f"flag it; needs a manual trim).")
+            continue
+        archive_path = result[0] if isinstance(result, tuple) else result
+        new = os.path.getsize(path)
+        _log("BOOT", f"auto-rotated {label}: {size:,} -> {new:,} chars "
+                     f"(full copy archived to {os.path.basename(archive_path)}).")
+        rotated.append((label, size, new, archive_path))
+    return rotated
+
+
 def _prompt_yes_no(prompt):
     """Interactive y/N prompt. Defaults to No on empty / EOF / interrupt."""
     try:
@@ -2558,6 +2683,12 @@ def start_musubi(config_path="musubi.toml", session_override=None):
     # stale-code / stale-config run at a glance against `git log -1`.
     print_startup_banner(cfg, config_path)
 
+    # Pre-flight: auto-hygiene (docs-2) — archive + trim any cycle doc that
+    # bloated past the rotate threshold, non-interactively, so the operator never
+    # has to remember to rotate. Capsule is trimmed (skeleton kept), not blanked.
+    # Runs BEFORE the size guard, which stays as the refuse backstop.
+    auto_rotate_managed_docs(cfg)
+
     # Pre-flight: refuse to launch on egregiously oversized managed docs and
     # warn on merely-large ones (orch-2). Runs before the tmux session so the
     # operator rotates first instead of paying the context cost every boot.
@@ -2841,6 +2972,23 @@ def attach_to_musubi(config_path="musubi.toml", session_override=None):
     """
     cfg = load_config(config_path)
     session_name = session_override or cfg["tmux"]["session_name"]
+
+    # --attach deliberately skips boot work (no auto-rotate, no comms reset), so a
+    # bloated capsule/handoff sails straight through. Warn loudly so the operator
+    # knows a heavy/forgetful pair is the docs, not the model — and that a clean
+    # `launch_musubi.sh` boot (not --attach) is what auto-trims them.
+    for label, path in _managed_doc_paths(cfg):
+        if label not in _AUTO_ROTATABLE:
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > MANAGED_DOC_WARN_CHARS:
+            _log("BOOT", f"WARNING: {label} is {size:,} chars (> {MANAGED_DOC_WARN_CHARS:,}) "
+                         f"— --attach does NOT trim it. Heavy/forgetful agents are this "
+                         f"bloat, not the model. Do a clean `launch_musubi.sh` boot to "
+                         f"auto-archive + trim it.")
 
     # One orchestrator per comms file here too: --attach doesn't truncate, but
     # two watchers on one comms file still double-relay into the panes. A live
