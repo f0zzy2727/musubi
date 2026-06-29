@@ -66,17 +66,21 @@ is_managed(){ [ -f "$1" ] && head -n1 "$1" 2>/dev/null | grep -q '<!-- musubi-ma
 
 # discover tomls. -c values are resolved against the musubi root (so a bare
 # filename works regardless of the caller's CWD), matching doctor.sh -c.
+# TOMLS is newline-separated and iterated with `while read` so paths (or the
+# musubi root) containing spaces are never word-split.
+TOMLS=""
 if [ -n "$ONLY_TOMLS" ]; then
-  TOMLS=""
   for c in $ONLY_TOMLS; do
-    case "$c" in /*) TOMLS="$TOMLS $c" ;; *) TOMLS="$TOMLS $MUSUBI_ROOT/$c" ;; esac
+    case "$c" in /*) TOMLS="$TOMLS
+$c" ;; *) TOMLS="$TOMLS
+$MUSUBI_ROOT/$c" ;; esac
   done
 else
-  TOMLS=""
   for f in "$MUSUBI_ROOT"/musubi*.toml; do
     [ -f "$f" ] || continue
     case "$f" in *.example) continue ;; esac
-    TOMLS="$TOMLS $f"
+    TOMLS="$TOMLS
+$f"
   done
 fi
 [ -n "$TOMLS" ] || { echo "No musubi*.toml found in $MUSUBI_ROOT" >&2; exit 1; }
@@ -118,7 +122,8 @@ fi
 echo
 
 # --- per-app -------------------------------------------------------------------
-for toml in $TOMLS; do
+while IFS= read -r toml; do
+  [ -z "$toml" ] && continue
   stem="$(basename "$toml" .toml)"
   proj="$(tomlval "$toml" path)"
   echo "== $stem =="
@@ -191,7 +196,9 @@ for toml in $TOMLS; do
   info "target: include real vision/architecture + the shared doc:"
   info "  context_docs = [\"docs/PRODUCT-VISION.md\", \"docs/ARCHITECTURE.md\", \"$SHARED_DOC\"]"
   echo
-done
+done <<EOF_TOMLS
+$TOMLS
+EOF_TOMLS
 
 echo "Next: run /musubi-setup-fix in this folder to fill the scaffolds with real"
 echo "content (interview + draft + your approval) and wire each toml's context_docs."

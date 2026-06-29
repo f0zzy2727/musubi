@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fix-setup.sh — one-command launcher for the musubi setup repair.
+# launch_setup_fix.sh — one-command launcher for the musubi setup repair.
 #
 # Opens an interactive agent session in your musubi folder and tells it to run
 # the /musubi-setup-fix routine: audit every musubi*.toml, apply the mechanical
