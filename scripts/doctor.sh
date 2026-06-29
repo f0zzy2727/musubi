@@ -267,7 +267,9 @@ fi
 if [ -f "$TOML" ] && [ -n "${proj_path:-}" ] && [ -d "${proj_path:-}" ]; then
   comms_rel="$(toml_value 'comms' 'file' "$TOML")"
   [ -z "$comms_rel" ] && comms_rel="docs/agents/comms/active.txt"
-  comms_path="$proj_path/$comms_rel"
+  # An absolute [comms].file is a supported config; only relative paths resolve
+  # against the project (matches the orchestrator's own resolution).
+  case "$comms_rel" in /*) comms_path="$comms_rel" ;; *) comms_path="$proj_path/$comms_rel" ;; esac
   if [ ! -e "$comms_path" ]; then
     warn "comms file not found: $comms_rel
         impact: the first session will create it; any prior history is not where musubi looks.
@@ -301,9 +303,12 @@ if [ "$oya_enabled" = "true" ]; then
       missing=""; managed=""; found_ctx=0
       for p in $ctx_paths; do
         found_ctx=1
-        if [ ! -e "$proj_path/$p" ]; then
+        # Absolute context_docs entries (e.g. a shared cross-app rules doc) are
+        # supported; resolve relative entries against the project.
+        case "$p" in /*) cpath="$p" ;; *) cpath="$proj_path/$p" ;; esac
+        if [ ! -e "$cpath" ]; then
           missing="$missing $p"
-        elif [ -f "$proj_path/$p" ] && head -n 1 "$proj_path/$p" | grep -q '<!-- musubi-managed:'; then
+        elif [ -f "$cpath" ] && head -n 1 "$cpath" | grep -q '<!-- musubi-managed:'; then
           # A musubi-managed template (e.g. docs/agents/IaA.md) is process
           # machinery bootstrap.sh refreshes — it contains zero product
           # knowledge. Pointing Oya's north-star at one means she boots

@@ -71,7 +71,8 @@ def test_report_flags_gaps_and_writes_nothing(tmp_path):
     proj = add_app(root, "thin", thin=True, binary_comms=True)
     r = run(root)
     assert r.returncode == 0, r.stderr
-    assert "no real north-star" in r.stdout
+    assert "no real product vision" in r.stdout
+    assert "no real architecture" in r.stdout
     assert "BINARY/corrupt" in r.stdout
     assert "no durable I&A home" in r.stdout
     # nothing written
@@ -134,3 +135,45 @@ def test_never_mutates_toml(tmp_path):
     before = (root / "musubi-thin.toml").read_text()
     run(root, "--fix", "-y")
     assert (root / "musubi-thin.toml").read_text() == before
+
+
+# --- codex P2: per-pillar north-star (was all-or-nothing) ---------------------
+
+def test_partial_north_star_scaffolds_only_missing(tmp_path):
+    # Vision present, architecture absent → scaffold ONLY architecture.
+    root = build_root(tmp_path)
+    proj = add_app(root, "default", thin=False)
+    (proj / "docs" / "ARCHITECTURE.md").unlink()  # remove the arch pillar
+    run(root, "--fix", "-y")
+    arch = proj / "docs" / "ARCHITECTURE.md"
+    assert arch.exists() and "DRAFT" in arch.read_text().splitlines()[0]
+    # vision was real → untouched (no DRAFT banner)
+    assert "DRAFT" not in (proj / "docs" / "PRODUCT-VISION.md").read_text()
+
+
+def test_architecture_as_dir_not_false_scaffolded(tmp_path):
+    # Architecture lives as docs/architecture/ (cc-aic shape) — must NOT scaffold
+    # a redundant docs/ARCHITECTURE.md over it.
+    root = build_root(tmp_path)
+    proj = add_app(root, "default", thin=False)
+    (proj / "docs" / "ARCHITECTURE.md").unlink()
+    adir = proj / "docs" / "architecture"
+    adir.mkdir()
+    (adir / "0001-decision.md").write_text("# adr\n")
+    r = run(root, "--fix", "-y")
+    assert not (proj / "docs" / "ARCHITECTURE.md").exists()
+    assert "architecture present" in r.stdout
+
+
+def test_absolute_comms_path_not_misjudged(tmp_path):
+    # An absolute [comms].file must be checked as-is, not prefixed with project.
+    root = build_root(tmp_path)
+    proj = add_app(root, "default", thin=False)
+    abs_comms = tmp_path / "external-active.txt"
+    abs_comms.write_text("@OPUS: hi\n")
+    toml = (root / "musubi.toml").read_text().replace(
+        'file = "docs/agents/comms/active.txt"', f'file = "{abs_comms}"')
+    (root / "musubi.toml").write_text(toml)
+    r = run(root)
+    # not reported as binary/missing; the per-app block runs clean on comms
+    assert "BINARY/corrupt" not in r.stdout

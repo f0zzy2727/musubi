@@ -215,6 +215,31 @@ def test_comms_empty_passes(tmp_path):
 # doctor was hardcoded to musubi.toml; -c lets it check any sibling config.
 # Without it, a sibling app would be checked against the wrong project.
 
+def test_absolute_comms_path_resolved_as_is(tmp_path):
+    # codex P2: an absolute [comms].file must not be prefixed with project.path.
+    fake_repo, proj = _build_repo(tmp_path, '[project]\npath = "__PROJ__"\n')
+    abs_comms = tmp_path / "ext-active.txt"
+    abs_comms.write_text("@OPUS: hi\n")
+    toml = fake_repo / "musubi.toml"
+    toml.write_text(toml.read_text().replace(
+        '[project]', f'[comms]\nfile = "{abs_comms}"\n[project]'))
+    lines = comms_lines(_run(fake_repo))
+    assert any("PASS" in ln and "readable text" in ln for ln in lines)
+    assert not any("not found" in ln for ln in lines)
+
+
+def test_absolute_context_doc_resolved_as_is(tmp_path):
+    # codex P2: an absolute context_docs entry (shared cross-app doc) must be
+    # checked as-is, not reported missing under project.path.
+    shared = tmp_path / "CROSS-APP-RULES.md"
+    shared.write_text("# shared rules\n")
+    toml = ('[project]\npath = "__PROJ__"\n[agents.oyakata]\n'
+            f'enabled = true\ncontext_docs = ["{shared}"]\n')
+    stdout, _ = run_doctor(tmp_path, toml)
+    lines = oya_lines(stdout)
+    assert any("PASS" in ln and "context_docs all present" in ln for ln in lines)
+
+
 def test_c_flag_targets_named_config(tmp_path):
     # Default config points at a non-existent path; the -c config points at the
     # real project. Proof of targeting: the real path appears, the bogus doesn't.
