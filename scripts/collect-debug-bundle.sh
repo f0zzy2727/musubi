@@ -61,22 +61,30 @@ OUTDIR=""
 TOMLS=""
 MUSUBI_DIR_OPT=""
 INCLUDE_TRANSCRIPTS=0
+MAXKB=51200   # per-file size cap (KB); files larger are skipped. Override with -S.
 
-while getopts "c:d:m:o:Th" opt; do
+# Binary / media / archive / model extensions never worth shipping for TEXT
+# analysis. These (esp. audio in TTS projects) are what blow a bundle to GB.
+SKIP_EXT_RE='\.(wav|mp3|m4a|aac|flac|ogg|opus|aif|aiff|wma|mp4|mov|avi|mkv|webm|m4v|png|jpg|jpeg|gif|bmp|tif|tiff|webp|ico|psd|heic|pdf|zip|gz|tgz|bz2|xz|7z|rar|tar|jar|war|woff|woff2|ttf|otf|eot|so|dylib|dll|bin|wasm|node|exe|class|pyc|pyo|sqlite|sqlite3|db|dat|model|onnx|pt|pth|ckpt|safetensors|npy|npz|parquet|mlmodel)$'
+
+while getopts "c:d:m:o:S:Th" opt; do
   case "$opt" in
     c) TOMLS="$TOMLS
 $OPTARG" ;;
     d) DAYS="$OPTARG" ;;
     m) MUSUBI_DIR_OPT="$OPTARG" ;;
     o) OUTDIR="$OPTARG" ;;
+    S) MAXKB="$OPTARG" ;;
     T) INCLUDE_TRANSCRIPTS=1 ;;
     h)
       sed -n '2,49p' "$0"
       exit 0
       ;;
-    *) echo "usage: $0 [-c musubi.toml]... [-m musubi-dir] [-d days] [-T] [-o outdir]" >&2; exit 2 ;;
+    *) echo "usage: $0 [-c musubi.toml]... [-m musubi-dir] [-d days] [-T] [-S maxKB] [-o outdir]" >&2; exit 2 ;;
   esac
 done
+
+case "$MAXKB" in *[!0-9]*|'') echo "ERROR: -S takes a number (KB)" >&2; exit 2 ;; esac
 
 # --- locate musubi checkout ---------------------------------------------------
 # The script may have been copied out of the checkout and run from anywhere
@@ -187,15 +195,48 @@ MANIFEST="$B/MANIFEST.txt"
 note() { echo "$1" | tee -a "$MANIFEST"; }
 miss() { echo "MISSING: $1" >> "$MANIFEST"; }
 
-# copy_one SRC DESTSUBDIR — copy file/dir if present, record either way
+# _copy_filtered SRCFILE DESTFILE LABEL — copy one file unless it is binary
+# or over the size cap. Returns 0 if copied, 1 if skipped/failed.
+_copy_filtered() {
+  f="$1"; dest="$2"; label="$3"
+  # fast extension reject (case-insensitive)
+  lc="$(printf '%s' "$f" | tr 'A-Z' 'a-z')"
+  if printf '%s' "$lc" | grep -qE "$SKIP_EXT_RE"; then
+    echo "SKIP(binary-ext): $label" >> "$MANIFEST"; return 1
+  fi
+  # size cap
+  bytes="$(wc -c < "$f" 2>/dev/null || echo 0)"
+  if [ "${bytes:-0}" -gt $((MAXKB * 1024)) ]; then
+    echo "SKIP(>${MAXKB}KB): $label (${bytes}B)" >> "$MANIFEST"; return 1
+  fi
+  # content sniff: catch extensionless binaries (grep -I = binary -> no match)
+  if ! grep -Iq . "$f" 2>/dev/null; then
+    echo "SKIP(binary-content): $label" >> "$MANIFEST"; return 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  cp "$f" "$dest" 2>/dev/null && return 0 || { miss "$label (copy failed)"; return 1; }
+}
+
+# copy_one SRC DESTSUBDIR — copy file/dir if present, record either way.
+# TEXT-ONLY and size-capped: binaries/media/archives and oversize files are
+# skipped (and noted in MANIFEST) so a binary-heavy project (e.g. TTS audio)
+# can't balloon the bundle to gigabytes.
 copy_one() {
   src="$1"; sub="$2"
-  if [ -e "$src" ]; then
-    mkdir -p "$B/$sub"
-    cp -R "$src" "$B/$sub/" 2>/dev/null && echo "OK: $src -> $sub/" >> "$MANIFEST" || miss "$src (copy failed)"
-  else
-    miss "$src"
+  if [ ! -e "$src" ]; then miss "$src"; return; fi
+  mkdir -p "$B/$sub"
+  if [ -f "$src" ]; then
+    _copy_filtered "$src" "$B/$sub/$(basename "$src")" "$src" \
+      && echo "OK: $src -> $sub/" >> "$MANIFEST"
+    return
   fi
+  # directory: mirror text files only, preserving structure
+  base="$(basename "$src")"; kept=0
+  find "$src" -type f 2>/dev/null | while IFS= read -r f; do
+    rel="${f#"$src"/}"
+    _copy_filtered "$f" "$B/$sub/$base/$rel" "$f" && kept=$((kept + 1))
+  done
+  echo "OK(dir): $src -> $sub/$base/ (text-only, <=${MAXKB}KB/file)" >> "$MANIFEST"
 }
 
 echo "musubi debug bundle — $STAMP" > "$MANIFEST"
