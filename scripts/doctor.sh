@@ -31,7 +31,19 @@ set -euo pipefail
 # can be run from anywhere (CI, a subdirectory, a wrapper).
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+
+# Which config to check. Defaults to musubi.toml; -c <file> targets another
+# (e.g. a sibling app's musubi-families.toml). Relative paths resolve against
+# the musubi root so wrappers can pass the bare filename.
 TOML="$REPO_ROOT/musubi.toml"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c) shift; case "$1" in /*) TOML="$1" ;; *) TOML="$REPO_ROOT/$1" ;; esac ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    *) echo "usage: $0 [-c musubi-<app>.toml]" >&2; exit 2 ;;
+  esac
+  shift
+done
 TOML_EXAMPLE="$REPO_ROOT/musubi.toml.example"
 
 # Tally of FAIL lines. Non-zero exit iff this ends up > 0.
@@ -244,6 +256,32 @@ if [ "$toml_ok" -eq 1 ] && [ -f "$TOML" ]; then
   fi
 else
   warn "skipping project.path check (musubi.toml not available)"
+fi
+
+# ---------------------------------------------------------------------------
+# Comms file health — the shared agent record must be readable UTF-8 text.
+# A binary/corrupt active.txt means the pair AND Oya read garbage as their
+# shared state. (Field specimen: a sibling app whose active.txt came back
+# binary in a debug bundle.)
+# ---------------------------------------------------------------------------
+if [ -f "$TOML" ] && [ -n "${proj_path:-}" ] && [ -d "${proj_path:-}" ]; then
+  comms_rel="$(toml_value 'comms' 'file' "$TOML")"
+  [ -z "$comms_rel" ] && comms_rel="docs/agents/comms/active.txt"
+  comms_path="$proj_path/$comms_rel"
+  if [ ! -e "$comms_path" ]; then
+    warn "comms file not found: $comms_rel
+        impact: the first session will create it; any prior history is not where musubi looks.
+        fix: confirm [comms].file in musubi.toml, or let the first session create it."
+  elif [ ! -s "$comms_path" ]; then
+    pass "comms file present (empty — fresh)"
+  elif ! grep -Iq . "$comms_path" 2>/dev/null; then
+    fail "comms file is not text (binary/corrupt): $comms_rel
+        impact: the pair and Oya read this as their shared record — binary means they see garbage.
+        fix: back it up and recreate as an empty text file:
+             mv \"$comms_path\" \"$comms_path.corrupt.bak\" && : > \"$comms_path\""
+  else
+    pass "comms file present and readable text ($comms_rel)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

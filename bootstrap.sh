@@ -526,6 +526,9 @@ echo "→ Slash command"
 copy_if_absent "$MUSUBI_ROOT/templates/claude-commands/open-sesame.md" \
                "$TARGET/.claude/commands/open-sesame.md" \
                ".claude/commands/open-sesame.md"
+copy_if_absent "$MUSUBI_ROOT/templates/claude-commands/musubi-setup-fix.md" \
+               "$TARGET/.claude/commands/musubi-setup-fix.md" \
+               ".claude/commands/musubi-setup-fix.md"
 echo ""
 
 # ---------------------------------------------------------------------------
