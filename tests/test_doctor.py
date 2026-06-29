@@ -155,3 +155,76 @@ def test_context_docs_missing_warns(tmp_path):
     assert any("WARN" in ln and "context_docs listed but missing" in ln
                for ln in lines)
     assert not any("FAIL" in ln for ln in lines)
+
+
+# --- comms file health -------------------------------------------------------
+# The shared agent record must be readable text. A binary/corrupt active.txt
+# means the pair and Oya read garbage. (Field specimen: a sibling app whose
+# active.txt came back binary in a debug bundle.)
+
+def _build_repo(tmp_path, toml_body, toml_name="musubi.toml"):
+    """Set up a throwaway repo+project WITHOUT running doctor; return paths."""
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy(DOCTOR_SRC, fake_repo / "scripts" / "doctor.sh")
+    proj = tmp_path / "proj"
+    (proj / "docs").mkdir(parents=True, exist_ok=True)
+    (fake_repo / toml_name).write_text(toml_body.replace("__PROJ__", str(proj)))
+    return fake_repo, proj
+
+
+def _run(fake_repo, args=None):
+    return subprocess.run(
+        ["bash", str(fake_repo / "scripts" / "doctor.sh")] + (args or []),
+        capture_output=True, text=True,
+    ).stdout
+
+
+def comms_lines(stdout):
+    return [ln for ln in stdout.splitlines() if "comms file" in ln]
+
+
+def test_comms_binary_fails(tmp_path):
+    fake_repo, proj = _build_repo(tmp_path, '[project]\npath = "__PROJ__"\n')
+    comms = proj / "docs" / "agents" / "comms"
+    comms.mkdir(parents=True)
+    (comms / "active.txt").write_bytes(bytes([0, 1, 2, 0, 255, 0, 7]))
+    lines = comms_lines(_run(fake_repo))
+    assert any("FAIL" in ln and "not text" in ln for ln in lines)
+
+
+def test_comms_text_passes(tmp_path):
+    fake_repo, proj = _build_repo(tmp_path, '[project]\npath = "__PROJ__"\n')
+    comms = proj / "docs" / "agents" / "comms"
+    comms.mkdir(parents=True)
+    (comms / "active.txt").write_text("@OPUS: hello\n")
+    lines = comms_lines(_run(fake_repo))
+    assert any("PASS" in ln and "readable text" in ln for ln in lines)
+
+
+def test_comms_empty_passes(tmp_path):
+    fake_repo, proj = _build_repo(tmp_path, '[project]\npath = "__PROJ__"\n')
+    comms = proj / "docs" / "agents" / "comms"
+    comms.mkdir(parents=True)
+    (comms / "active.txt").write_text("")
+    lines = comms_lines(_run(fake_repo))
+    assert any("PASS" in ln and "fresh" in ln for ln in lines)
+
+
+# --- -c config targeting -----------------------------------------------------
+# doctor was hardcoded to musubi.toml; -c lets it check any sibling config.
+# Without it, a sibling app would be checked against the wrong project.
+
+def test_c_flag_targets_named_config(tmp_path):
+    # Default config points at a non-existent path; the -c config points at the
+    # real project. Proof of targeting: the real path appears, the bogus doesn't.
+    bogus = tmp_path / "nonexistent-default"
+    (tmp_path / "repo" / "scripts").mkdir(parents=True)
+    shutil.copy(DOCTOR_SRC, tmp_path / "repo" / "scripts" / "doctor.sh")
+    proj = tmp_path / "proj"
+    (proj / "docs").mkdir(parents=True)
+    (tmp_path / "repo" / "musubi.toml").write_text(f'[project]\npath = "{bogus}"\n')
+    (tmp_path / "repo" / "musubi-app2.toml").write_text(f'[project]\npath = "{proj}"\n')
+    out = _run(tmp_path / "repo", ["-c", "musubi-app2.toml"])
+    assert str(proj) in out
+    assert str(bogus) not in out

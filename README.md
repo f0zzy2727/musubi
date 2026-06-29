@@ -153,7 +153,9 @@ musubi/
 │   ├── ci-baseline.sh              # Pre-push CI baseline check
 │   ├── ledger-from-comms.py        # Mechanical rules-ledger fire counter (cycle close)
 │   ├── cost-report.py              # Honest Claude-side token accounting from local logs
-│   ├── doctor.sh                   # Preflight: checks tmux, CLIs, clipboard, paths
+│   ├── doctor.sh                   # Preflight: checks tmux, CLIs, clipboard, paths, comms health, north-star (-c targets any app)
+│   ├── setup-fix.sh                # Cross-app setup repair engine — scaffolds north-star, durable I&A home, fixes binary comms
+│   ├── launch_setup_fix.sh         # One-command launcher for the guided /musubi-setup-fix repair
 │   └── attach-oya.sh               # Adds the optional third (Oya supervisor) pane; invoked by the orchestrator
 │
 ├── tests/                          # 400+ tests — parsing, relay, lane classifier,
@@ -622,7 +624,9 @@ cp templates/VISION.md templates/ROADMAP.md templates/ARCHITECTURE.md /path/to/y
 
 These stubs are project-owned — copy once and edit freely; musubi never refreshes or overwrites them.
 
-`scripts/doctor.sh` checks this for you: when Oya is enabled, it WARNs if no vision/architecture/roadmap docs are found (or if a `context_docs` path is missing), so you catch it before launch rather than on Oya's turn one.
+`scripts/doctor.sh` checks this for you: when Oya is enabled, it WARNs if no vision/architecture/roadmap docs are found (or if a `context_docs` path is missing), so you catch it before launch rather than on Oya's turn one. Pass `-c musubi-<app>.toml` to check a specific app's config.
+
+**Repairing it across many apps.** When you run several apps and the wiring has drifted — some booting blind on a managed template, lessons saved to a file that clobbers them, no rule shared across apps — `scripts/setup-fix.sh` reports the gaps per app (read-only; `--fix` applies, with backups), and the `/musubi-setup-fix` command (or `bash scripts/launch_setup_fix.sh`) drives an agent through the full repair: scaffold a real north-star, create a durable `docs/i-and-a/` home, lay a shared cross-app rules doc, then interview you to fill the content and wire each `context_docs` — never inventing-and-committing intent without your approval. This closes the loop where a lesson learned in one app never reaches the others, so the same bug stops being re-derived. `-c` scopes any of it to one app.
 
 ### To enable
 

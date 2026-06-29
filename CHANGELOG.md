@@ -6,7 +6,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-app setup repair tooling.** New `scripts/setup-fix.sh` (mechanical
+  engine: scaffolds a real north-star, creates a durable `docs/i-and-a/` home,
+  repairs binary/corrupt comms files, lays a shared cross-app rules skeleton;
+  report by default, `--fix` with backups, idempotent, `-c` scopes to one app —
+  never mutates tomls), `scripts/launch_setup_fix.sh` (one-command interactive
+  launcher), and the `/musubi-setup-fix` command
+  (`templates/claude-commands/musubi-setup-fix.md`, installed by `bootstrap.sh`)
+  that drives an agent through audit → mechanical fix → interview/draft/approve
+  real content → wire `context_docs`. Closes the loop where a lesson learned in
+  one app never reaches its siblings, so the same bug stops being re-derived.
+  Field origin: an operator's five apps, three booting Oya on the managed
+  `IaA.md` with the reclone lesson absent from every rules-ledger.
+- **`collect-debug-bundle.sh` is text-only and size-capped** — binary/media/model
+  files (e.g. TTS audio) and oversize files are skipped (logged in the MANIFEST),
+  so a binary-heavy project no longer balloons the bundle to gigabytes.
+
 ### Changed
+
+- **`scripts/doctor.sh` gains a comms-file health check and `-c` config
+  targeting.** It now FAILs on a binary/corrupt `active.txt` (the pair and Oya
+  read it as their shared record), and `-c musubi-<app>.toml` checks any sibling
+  config instead of only the default `musubi.toml`.
 
 - **Repo-scoped orientation reads auto-approve under the disclosure opt-in
   (`perm-1`).** The agents' per-session boot orientation (`sed -n`/`tail`/`head`/

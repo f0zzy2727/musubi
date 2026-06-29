@@ -64,9 +64,13 @@ tomlval(){ grep -m1 -E "^[[:space:]]*$2[[:space:]]*=" "$1" 2>/dev/null \
 # is this path a musubi-managed template (zero product knowledge)?
 is_managed(){ [ -f "$1" ] && head -n1 "$1" 2>/dev/null | grep -q '<!-- musubi-managed:'; }
 
-# discover tomls
+# discover tomls. -c values are resolved against the musubi root (so a bare
+# filename works regardless of the caller's CWD), matching doctor.sh -c.
 if [ -n "$ONLY_TOMLS" ]; then
-  TOMLS="$ONLY_TOMLS"
+  TOMLS=""
+  for c in $ONLY_TOMLS; do
+    case "$c" in /*) TOMLS="$TOMLS $c" ;; *) TOMLS="$TOMLS $MUSUBI_ROOT/$c" ;; esac
+  done
 else
   TOMLS=""
   for f in "$MUSUBI_ROOT"/musubi*.toml; do

@@ -50,6 +50,7 @@ def test_install_creates_expected_layout(tmp_path):
         "AGENTS.md",
         ".gitignore",
         "scripts/classify-slice.sh",   # runbook depends on it (protocol-1)
+        ".claude/commands/musubi-setup-fix.md",   # setup-repair routine
     ]
     for rel in expect:
         assert (tmp_path / rel).exists(), f"missing {rel}"
