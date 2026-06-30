@@ -533,6 +533,21 @@ def validate_project_path(project_path):
 MANAGED_DOC_WARN_CHARS = 40_000
 MANAGED_DOC_REFUSE_CHARS = 100_000
 
+# Oya append-log rotation (burn-1). The supervisor's own audit streams —
+# oyakata-log.md (one entry per activation, append-only by prompt design),
+# oyakata-decisions.md (one line per PreToolUse auto-approve), and
+# operator-channel.md (verbatim mirror of Oya->operator messages) — are NOT
+# cycle-structured pair docs, so rotate_managed_doc can't trim them. Left
+# unguarded they grow without bound and are reloaded into context every Oya
+# turn; under an unattended auto-wake loop across several apps that is the
+# 2026-06-30 token-burn ($100/hr, 2.5B cache-read tokens). These get a
+# tail-rotation (keep the header + most-recent tail, archive the rest) so warm
+# context stays cheap no matter how the operator vibes. Trigger high enough that
+# a normal session never rotates mid-flight; keep generous so recent history
+# survives. Override via [comms].oya_log_rotate_chars / oya_log_keep_chars.
+OYA_LOG_ROTATE_CHARS = 80_000
+OYA_LOG_KEEP_CHARS = 30_000
+
 # Depth of the recently-relayed dedup window (see its use in watch_and_relay).
 # Must be at least one full cycle's worth of comms messages: when the active
 # comms file is truncated+rewritten mid-cycle by something external, the watcher
@@ -562,6 +577,99 @@ def _managed_doc_paths(cfg):
         ("agent-handoff", _abs("docs/agents/agent-handoff.md")),
     ]
     return candidates
+
+
+def _oya_append_log_paths(cfg):
+    """Resolve Oya's own append-only audit streams (burn-1). These are NOT
+    cycle-structured pair docs — they accrete forever and are reloaded into
+    Oya's context every turn — so they get tail-rotation, not section-rotation.
+    Returns [(label, abs_path)]. Independent of whether Oya is enabled: a config
+    flip leaves the files behind, and a stale 1MB log still costs on the next
+    boot that does enable her."""
+    project = cfg.get("project", {}).get("path", ".")
+
+    def _abs(rel):
+        return rel if os.path.isabs(rel) else os.path.join(project, rel)
+
+    oya = cfg.get("agents", {}).get("oyakata", {})
+    return [
+        ("oyakata-log", _abs(oya.get("log_path", "docs/agents/oyakata-log.md"))),
+        ("oyakata-decisions", _abs("docs/agents/oyakata-decisions.md")),
+        ("operator-channel", _abs("docs/agents/operator-channel.md")),
+    ]
+
+
+# An "entry" in an Oya append-log is a top-level dated section header
+# (oyakata-log / operator-channel: `## 2026-06-30 ...`) or a bare ISO-timestamp
+# line (oyakata-decisions: `2026-06-30T09:15 ALLOW ...`). Everything before the
+# first match is preamble (title + format note) and is always preserved.
+_OYA_ENTRY_START_RE = re.compile(
+    r"^(?:##\s.*\d{4}-\d{2}-\d{2}|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2})", re.MULTILINE)
+
+
+_OYA_LOG_PREAMBLE_CAP = 4000
+
+
+def rotate_append_log(path, keep_chars=OYA_LOG_KEEP_CHARS):
+    """Tail-rotate an append-only audit log (burn-1): archive the full file, then
+    rewrite it as a bounded document header + a rotation pointer + the
+    most-recent tail (<= keep_chars). The tail snaps to an entry boundary when
+    one falls in the keep window (clean for oyakata-log / -decisions); otherwise
+    it snaps to a line boundary, so the cap holds even for operator-channel —
+    whose dated headers are front-loaded and whose bulk is one giant header-less
+    trailing section. Lossless — the complete prior content is copied to
+    docs/agents/archive/<stem>-archive-<date>.md first.
+
+    Returns the archive path, or None when the file already fits under keep_chars
+    or can't be trimmed without eating the header."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    if len(text) <= keep_chars:
+        return None  # already small enough
+
+    starts = [m.start() for m in _OYA_ENTRY_START_RE.finditer(text)]
+
+    # Bounded document header (title + format note). Crucially NOT "everything
+    # before the first dated entry": operator-channel's first `## ` header can sit
+    # 500KB in, and that bulk must be archived, not kept as preamble.
+    if starts and starts[0] <= _OYA_LOG_PREAMBLE_CAP:
+        preamble = text[:starts[0]]
+    else:
+        nl = text.rfind("\n", 0, _OYA_LOG_PREAMBLE_CAP)
+        preamble = text[:nl + 1] if nl != -1 else ""
+
+    # Keep from the earliest entry boundary whose tail still fits under
+    # keep_chars; fall back to a line boundary when none falls in the window.
+    cut = len(text) - keep_chars
+    kept_from = next((s for s in starts if s >= cut), None)
+    if kept_from is None or kept_from <= len(preamble):
+        nl = text.find("\n", cut)
+        kept_from = nl + 1 if nl != -1 else cut
+    if kept_from <= len(preamble):
+        return None  # tail would overlap the header — file too small to bother
+
+    kept = text[kept_from:]
+
+    archive_dir = os.path.join(os.path.dirname(path), "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    archive_path = os.path.join(archive_dir, f"{stem}-archive-{stamp}.md")
+    if os.path.exists(archive_path):
+        archive_path = os.path.join(
+            archive_dir, f"{stem}-archive-{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.md")
+    shutil.copy2(path, archive_path)
+
+    pointer = (
+        f"\n---\n\n> **Tail-rotated {stamp} (musubi append-log rotation, burn-1).** "
+        f"Older entries are archived to `docs/agents/archive/{os.path.basename(archive_path)}` "
+        f"— full prior log preserved there and in git history. This file keeps only the "
+        f"most-recent tail so it stays cheap to reload every Oya turn.\n\n"
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(preamble.rstrip() + "\n" + pointer + kept.lstrip())
+    return archive_path
 
 
 # A cycle section in a log-shaped managed doc (handoff / todo) is a `## ` header
@@ -795,6 +903,32 @@ def auto_rotate_managed_docs(cfg):
         _log("BOOT", f"auto-rotated {label}: {size:,} -> {new:,} chars "
                      f"(full copy archived to {os.path.basename(archive_path)}).")
         rotated.append((label, size, new, archive_path))
+
+    # Oya's append-only audit streams (burn-1): tail-rotate, not section-rotate.
+    # These are the 2026-06-30 token-burn root cause — unbounded files reloaded
+    # every Oya turn. Same archive-safe contract.
+    oya_threshold = comms.get("oya_log_rotate_chars", OYA_LOG_ROTATE_CHARS)
+    oya_keep = comms.get("oya_log_keep_chars", OYA_LOG_KEEP_CHARS)
+    for label, path in _oya_append_log_paths(cfg):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size <= oya_threshold:
+            continue
+        try:
+            archive_path = rotate_append_log(path, keep_chars=oya_keep)
+        except (OSError, RuntimeError) as e:
+            _log("BOOT", f"append-log auto-rotate skipped {label} ({e}); left as-is.")
+            continue
+        if archive_path is None:
+            _log("BOOT", f"append-log {label} is {size:,} chars but has no entry "
+                         f"boundary to trim on — left as-is (needs a manual look).")
+            continue
+        new = os.path.getsize(path)
+        _log("BOOT", f"tail-rotated {label}: {size:,} -> {new:,} chars "
+                     f"(full copy archived to {os.path.basename(archive_path)}).")
+        rotated.append((label, size, new, archive_path))
     return rotated
 
 
@@ -830,6 +964,21 @@ def check_managed_doc_sizes(cfg, interactive=None):
         elif size > MANAGED_DOC_WARN_CHARS:
             _log("BOOT", f"WARNING: {label} is {size:,} chars (> {MANAGED_DOC_WARN_CHARS:,}). "
                          f"Rotate at cycle close to keep warm-start context cheap.")
+
+    # Oya's append-logs are warn-only here — never block launch on an audit
+    # trail. auto_rotate_managed_docs already tail-trims them; this fires only if
+    # auto-rotate is disabled or couldn't find an entry boundary (burn-1).
+    oya_threshold = cfg.get("comms", {}).get("oya_log_rotate_chars", OYA_LOG_ROTATE_CHARS)
+    for label, path in _oya_append_log_paths(cfg):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > oya_threshold:
+            _log("BOOT", f"WARNING: Oya append-log {label} is {size:,} chars "
+                         f"(> {oya_threshold:,}) and was NOT auto-trimmed — it reloads into "
+                         f"Oya's context every turn. Enable auto_rotate_managed_docs or trim "
+                         f"it manually (the burn-1 token-cost path).")
 
     remaining = []
     for label, path, size in offenders:

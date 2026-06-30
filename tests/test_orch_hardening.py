@@ -315,3 +315,104 @@ def test_auto_rotate_leaves_claude_md_alone(tmp_path):
     cfg = {"comms": {}, "project": {"path": str(tmp_path)}}
     assert auto_rotate_managed_docs(cfg) == []
     assert (tmp_path / "CLAUDE.md").stat().st_size > MANAGED_DOC_WARN_CHARS  # untouched
+
+
+# --- burn-1: Oya append-log tail-rotation ----------------------------------
+from orchestrator import (
+    rotate_append_log,
+    OYA_LOG_ROTATE_CHARS,
+    OYA_LOG_KEEP_CHARS,
+)
+
+
+def _write_oya_log(tmp_path, name, n_entries, entry_chars, header, entry_fmt):
+    """Append-only Oya log: a small document header + many dated entries."""
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    parts = [header]
+    for i in range(n_entries):
+        parts.append(entry_fmt(i) + "x" * entry_chars + "\n")
+    p = agents / name
+    p.write_text("".join(parts))
+    return p
+
+
+def test_rotate_append_log_dated_sections_keeps_header_and_tail(tmp_path):
+    # oyakata-log shape: `## YYYY-MM-DD ...` entry headers.
+    p = _write_oya_log(
+        tmp_path, "oyakata-log.md", n_entries=200, entry_chars=2000,
+        header="# Oyakata Log\n\nAppend-only.\n\n---\n",
+        entry_fmt=lambda i: f"\n## 2026-06-{(i % 28) + 1:02d} 0{i % 10}:00 UTC — entry {i}\n")
+    orig = p.read_text()
+    assert p.stat().st_size > OYA_LOG_ROTATE_CHARS
+    archive = rotate_append_log(p, keep_chars=OYA_LOG_KEEP_CHARS)
+    assert archive is not None
+    # Lossless: archive holds the full original.
+    assert pathlib.Path(archive).read_text() == orig
+    new = p.read_text()
+    assert p.stat().st_size <= OYA_LOG_KEEP_CHARS + 4000  # header cap headroom
+    assert new.startswith("# Oyakata Log")           # header preserved
+    assert "append-log rotation" in new              # rotation pointer present
+    assert new.rstrip().endswith("x" * 100)          # most-recent tail kept
+
+
+def test_rotate_append_log_iso_lines(tmp_path):
+    # oyakata-decisions shape: bare `YYYY-MM-DDTHH:MM ...` lines, no `## ` headers.
+    p = _write_oya_log(
+        tmp_path, "oyakata-decisions.md", n_entries=2000, entry_chars=80,
+        header="# oyakata-decisions — auto-approve audit trail\n\nFormat: ...\n",
+        entry_fmt=lambda i: f"2026-06-30T0{i % 10}:15 ALLOW Read :: ")
+    assert rotate_append_log(p, keep_chars=OYA_LOG_KEEP_CHARS) is not None
+    assert p.stat().st_size <= OYA_LOG_KEEP_CHARS + 4000
+    assert p.read_text().startswith("# oyakata-decisions")
+
+
+def test_rotate_append_log_buried_first_header_line_snaps(tmp_path):
+    # operator-channel shape: a tiny header, then a huge header-less mirror body,
+    # then a single `## ` header far in. "Everything before first entry" would
+    # keep the whole body — the bounded-header + line-snap path must not.
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    p = agents / "operator-channel.md"
+    body = "".join(f"mirrored message line {i}\n" for i in range(20000))
+    p.write_text("# Operator Channel\n\n> intro blurb\n\n" + body + "## 2026-06-30 late header\nend\n")
+    assert p.stat().st_size > OYA_LOG_ROTATE_CHARS
+    archive = rotate_append_log(p, keep_chars=OYA_LOG_KEEP_CHARS)
+    assert archive is not None
+    assert p.stat().st_size <= OYA_LOG_KEEP_CHARS + 4000   # actually trimmed
+    assert p.read_text().startswith("# Operator Channel")  # header preserved
+
+
+def test_rotate_append_log_small_file_noop(tmp_path):
+    agents = tmp_path / "docs" / "agents"
+    agents.mkdir(parents=True, exist_ok=True)
+    p = agents / "oyakata-log.md"
+    p.write_text("# Oyakata Log\n\n## 2026-06-30 01:00 UTC — only entry\nshort\n")
+    assert rotate_append_log(p) is None  # under keep_chars — nothing to do
+
+
+def test_auto_rotate_trims_oya_logs_idempotent(tmp_path):
+    # Full boot path: all three Oya logs over threshold get tail-rotated once.
+    big = "y" * (OYA_LOG_ROTATE_CHARS + 50_000)
+    _write_oya_log(tmp_path, "oyakata-log.md", 1, len(big),
+                   header="# Oyakata Log\n\n---\n",
+                   entry_fmt=lambda i: "\n## 2026-06-30 01:00 UTC — e\n")
+    _write_oya_log(tmp_path, "oyakata-decisions.md", 1, len(big),
+                   header="# oyakata-decisions\n\n",
+                   entry_fmt=lambda i: "2026-06-30T01:00 ALLOW Read :: ")
+    cfg = {"comms": {}, "project": {"path": str(tmp_path)},
+           "agents": {"oyakata": {}}}
+    labels = {r[0] for r in auto_rotate_managed_docs(cfg)}
+    assert "oyakata-log" in labels and "oyakata-decisions" in labels
+    # Idempotent: a second boot rotates nothing (already small).
+    assert auto_rotate_managed_docs(cfg) == []
+
+
+def test_auto_rotate_oya_logs_respects_disable_flag(tmp_path):
+    _write_oya_log(tmp_path, "oyakata-log.md", 1,
+                   OYA_LOG_ROTATE_CHARS + 50_000,
+                   header="# Oyakata Log\n\n---\n",
+                   entry_fmt=lambda i: "\n## 2026-06-30 01:00 UTC — e\n")
+    cfg = {"comms": {"auto_rotate_managed_docs": False},
+           "project": {"path": str(tmp_path)}, "agents": {"oyakata": {}}}
+    assert auto_rotate_managed_docs(cfg) == []  # gated off → untouched
