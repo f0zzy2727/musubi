@@ -752,6 +752,61 @@ A reference implementation ships with musubi at `scripts/ci-baseline.sh`.
 
 ---
 
+## Capability Registry
+
+The project keeps a written record of what the agents can actually reach and how:
+`docs/agents/capability-registry.md` (scaffold: `templates/CAPABILITY-REGISTRY.md`).
+It lists each agent's strengths and browser path, and the connector for each
+external service (RevenueCat, cloud APIs, the app stores).
+
+### Unknown is not impossible
+
+Before telling the operator an external action **cannot** be done — enable an API,
+flip a billing setting, drive a browser, create a store product — check the
+capability registry first. The honest outcomes are: use the listed path; route to
+the sibling agent that's better at it (name which); or, if there is genuinely no
+known path, say so explicitly *and append the answer to the registry once found*.
+
+A flat *"I can't, do it manually"* with no check against the registry is a defect:
+it makes the operator re-explain the same connector every cycle. Prefer an
+API/CLI/MCP over a browser login (browser logins land in a fresh profile with no
+extensions or sessions — the slow, re-auth-every-time path).
+
+This rule exists because an orchestrator repeatedly refused service tasks it had a
+path for (e.g. a billing provider's official MCP) and lost operator hours to
+manual workarounds that were never necessary.
+
+**Mechanism:**
+- Run: `test -f docs/agents/capability-registry.md && echo present` before declaring any external action impossible
+- Expect: the registry exists and was consulted; the response names the path, the routed agent, or an explicit "no known path — appending"
+- Fail if: an agent declares a task impossible/manual-only without consulting the registry, or finds a new connector and does not record it
+
+---
+
+## Ship Definition of Done
+
+A release is not done because the code is done. The completeness gate for "is this
+actually shipped?" lives at `docs/agents/ship-dod.md` (scaffold:
+`templates/SHIP-DOD.md`). It is the counter to the audit failure mode where every
+small code detail gets flagged but the ONE fundamental missing thing does not —
+no product created in the store, a required API never enabled.
+
+Audits are good at present-vs-spec and blind to ABSENT. The ship-DoD makes the
+absent things explicit, line by line. At any "ready to ship / it's live" claim,
+each line reads DONE or N/A-with-reason; a silent line is an open blocker even
+when every test passes.
+
+This rule exists because an app was declared shipped with no purchasable product
+created in the store — and nothing in the cycle ever raised it, because no check
+was looking for the *absence*.
+
+**Mechanism:**
+- Run: at the ship claim, paste `docs/agents/ship-dod.md` into comms with every line marked DONE or N/A-<reason>
+- Expect: zero unmarked lines; every paid-tier store-product line explicitly addressed
+- Fail if: a release is declared done with any line silent — especially a store-product line
+
+---
+
 ## Rule Quality
 
 ### Mechanism block on every new rule
@@ -824,6 +879,7 @@ Before push to `main` on any multi-slice effort, confirm all of these explicitly
 - [ ] Pre-commit staged-scope guard passed (mechanism)
 - [ ] Pre-push CI baseline status surfaced verbatim (mechanism)
 - [ ] Comms cycle archived or scheduled for archive
+- [ ] If this push ships a release (not just code): Ship Definition of Done walked — every line DONE or N/A-with-reason (see `docs/agents/ship-dod.md`)
 - [ ] Push to `main` explicitly approved by `@LEAD`
 
 Do not self-approve a push. The human lead closes the gate.
