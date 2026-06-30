@@ -356,3 +356,60 @@ def test_rotation_holds_when_not_quiet_long_enough():
 
 def test_rotation_disabled_when_max_bytes_zero():
     assert rotation_due(10_000_000, 10_000_000, 10_000, 0, QUIET) is False
+
+
+# --- burn-1 follow-up: wake-loop circuit-breaker -------------------------------
+from orchestrator import WakeGovernor
+
+
+def test_wake_governor_allows_under_cap():
+    g = WakeGovernor(max_wakes=3, window_secs=100)
+    assert [g.allow(t) for t in (0, 1, 2)] == [True, True, True]
+    assert g.tripped is False
+    assert g.count == 3
+
+
+def test_wake_governor_trips_at_cap():
+    g = WakeGovernor(max_wakes=3, window_secs=100)
+    for t in (0, 1, 2):
+        g.allow(t)
+    # 4th within the window is denied and records nothing.
+    assert g.allow(3) is False
+    assert g.tripped is True
+    assert g.count == 3  # the denied event was NOT recorded
+
+
+def test_wake_governor_self_heals_after_window_drains():
+    g = WakeGovernor(max_wakes=2, window_secs=100)
+    g.allow(0); g.allow(1)
+    assert g.allow(2) is False           # tripped while events are in-window
+    # At t=102 the early events (0,1) age out (<= 102-100); breaker re-arms.
+    assert g.allow(102) is True
+    assert g.tripped is False
+
+
+def test_wake_governor_sliding_window_not_fixed_buckets():
+    # A sustained max-rate stays tripped: as old events leave, new denials don't
+    # record, so the window never refills enough to allow a burst.
+    g = WakeGovernor(max_wakes=2, window_secs=10)
+    assert g.allow(0) and g.allow(1)
+    # Hammer every second past the cap — all denied while 2 events stay in-window.
+    assert [g.allow(t) for t in (2, 3, 4, 5)] == [False, False, False, False]
+    # Once BOTH seed events (0,1) have aged out (t>=11+), a single wake is allowed.
+    assert g.allow(12) is True
+
+
+def test_wake_governor_disabled_when_max_zero():
+    g = WakeGovernor(max_wakes=0, window_secs=100)
+    assert all(g.allow(t) for t in range(50))
+    assert g.tripped is False
+
+
+def test_wake_governor_michael_burn_rate_trips_fast():
+    # The 2026-06-30 signature: a nudge every few minutes for hours. With the
+    # default 10/hour cap, the 11th nudge inside the hour is suppressed.
+    g = WakeGovernor()  # defaults: 10 / 3600s
+    allowed = [g.allow(t * 180) for t in range(20)]  # every 3 min
+    assert allowed[:10] == [True] * 10
+    assert allowed[10] is False           # 11th within the hour -> tripped
+    assert g.tripped is True

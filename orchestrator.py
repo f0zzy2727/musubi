@@ -1584,6 +1584,63 @@ def relay_instruction(message_block, sender, p_claude, p_codex, cfg):
 
 
 # ---------------------------------------------------------------------------
+# Wake-loop circuit-breaker (burn-1 follow-up)
+# ---------------------------------------------------------------------------
+
+# Every pane keystroke-nudge (the silence watchdog + the park watchdog) provokes
+# an agent turn, which reloads that agent's whole context — the per-event cost
+# that, multiplied by an unattended auto-wake loop running for hours across
+# several apps, was the 2026-06-30 token-burn. The size-rotation fix shrank the
+# context each turn reloads; this bounds how OFTEN we provoke a turn at all.
+#
+# The signal is a sliding-window rate cap, not a progress check: a wake only ever
+# fires while the channel is already stuck (quiet/parked past threshold), so in a
+# healthy session that makes real progress, wakes are sporadic and the window
+# never fills. A SUSTAINED max-rate of wakes means a sustained stuck channel that
+# the nudges are not clearing — a self-feeding loop — and we stop feeding it and
+# alarm the operator instead of quietly burning tokens until the cap.
+WAKE_GOVERNOR_MAX_DEFAULT = 10        # nudges allowed per window before tripping
+WAKE_GOVERNOR_WINDOW_DEFAULT = 3600   # window, seconds (default: 10 nudges / hour)
+
+
+class WakeGovernor:
+    """Sliding-window rate limiter for pane keystroke-nudges (burn-1 follow-up).
+
+    allow(now) records the wake and returns True while under the cap; once
+    `max_wakes` events fall inside `window_secs` it returns False (tripped) and
+    records nothing, so the breaker self-heals as old events age out of the
+    window — an enforced cooldown, no manual re-arm. max_wakes <= 0 disables it
+    (always allows)."""
+
+    def __init__(self, max_wakes=WAKE_GOVERNOR_MAX_DEFAULT,
+                 window_secs=WAKE_GOVERNOR_WINDOW_DEFAULT):
+        self.max_wakes = max_wakes
+        self.window_secs = window_secs
+        self._events = deque()
+        self.tripped = False
+
+    def _prune(self, now):
+        cutoff = now - self.window_secs
+        while self._events and self._events[0] <= cutoff:
+            self._events.popleft()
+
+    def allow(self, now):
+        if self.max_wakes <= 0:
+            return True  # disabled
+        self._prune(now)
+        if len(self._events) >= self.max_wakes:
+            self.tripped = True
+            return False
+        self.tripped = False
+        self._events.append(now)
+        return True
+
+    @property
+    def count(self):
+        return len(self._events)
+
+
+# ---------------------------------------------------------------------------
 # Main watcher loop
 # ---------------------------------------------------------------------------
 
@@ -1660,6 +1717,43 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
     idle_wake_secs = cfg.get("comms", {}).get("idle_wake_seconds", 300)
     silence_nudges = 0
     last_silence_nudge_time = 0.0
+
+    # Wake-loop circuit-breaker (burn-1 follow-up). Bounds how often the silence
+    # and park watchdogs may keystroke-nudge a pane (each nudge = an agent turn =
+    # a context reload = tokens). Sized so a healthy session's sporadic wakes
+    # never trip it, but a sustained unattended self-feeding loop does — at which
+    # point we suppress the nudge and alarm the operator instead of burning
+    # tokens to the cap. [comms].max_wakes_per_window = 0 disables.
+    wake_gov = WakeGovernor(
+        max_wakes=cfg.get("comms", {}).get("max_wakes_per_window",
+                                           WAKE_GOVERNOR_MAX_DEFAULT),
+        window_secs=cfg.get("comms", {}).get("wake_window_seconds",
+                                             WAKE_GOVERNOR_WINDOW_DEFAULT))
+    _wake_was_tripped = False
+
+    def _wake_allowed(now):
+        """Gate a pane keystroke-nudge through the circuit-breaker. Returns True
+        if the nudge may fire; on the trip edge surfaces ONE operator alarm and
+        suppresses it. Self-heals (re-arms) once the rate falls back under cap."""
+        nonlocal _wake_was_tripped
+        if wake_gov.allow(now):
+            if _wake_was_tripped:
+                _wake_was_tripped = False
+                _log("WATCHER", "wake-loop circuit-breaker re-armed — nudge rate "
+                                "fell back under cap; auto-wake resumed.")
+            return True
+        if not _wake_was_tripped:
+            _wake_was_tripped = True
+            mins = wake_gov.window_secs / 60.0
+            _surface_refusal("wake-runaway",
+                f"auto-wake paused — {wake_gov.max_wakes} pane nudges fired in "
+                f"~{mins:.0f} min and the channel is still stuck. That is the "
+                f"self-feeding loop that burns tokens unattended (the 2026-06-30 "
+                f"incident). Check the panes or stop the loop; auto-wake re-arms "
+                f"on its own once the nudge rate falls.")
+            _log("WATCHER", f"wake-loop circuit-breaker TRIPPED — suppressing "
+                            f"nudges ({wake_gov.count} in window).")
+        return False
 
     opus_handle = cfg["agents"]["opus"]["handle"]
     coda_handle = cfg["agents"]["coda"]["handle"]
@@ -2223,7 +2317,7 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                     # next concrete step; persisting → escalate to the operator.
                     _park_nudges[label] += 1
                     mins = idle / 60.0
-                    if _park_nudges[label] == 1:
+                    if _park_nudges[label] == 1 and _wake_allowed(now):
                         send_message(pane,
                             f"[park watchdog] Your pane has shown no movement for "
                             f"~{mins:.0f} min and you are not mid-turn. If you have "
@@ -2433,7 +2527,7 @@ def watch_and_relay(p_claude, p_codex, cfg, session=None, oya_boot_note=None):
                     waiting_on_operator = bool(oa_active and oa_status_text)
                     if silence_nudge_due(idle, idle_wake_secs, silence_nudges,
                                          now - last_silence_nudge_time,
-                                         waiting_on_operator):
+                                         waiting_on_operator) and _wake_allowed(now):
                         silence_nudges += 1
                         last_silence_nudge_time = now
                         _wake_idle_channel(idle, silence_nudges)
