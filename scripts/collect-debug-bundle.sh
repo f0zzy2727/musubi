@@ -40,8 +40,19 @@
 #     survive
 #   - Claude Code transcripts for that project (~/.claude/projects/<slug>/)
 #     — Oya's boot Read calls are the hard evidence of what she actually read
+#   - Fly.io logs (best-effort): if `flyctl` is installed/authed and a
+#     fly.toml is found under the project (up to 3 levels deep, e.g.
+#     backend/fly.toml or <subproject>/backend/fly.toml), runs
+#     `flyctl logs -a <app> --no-tail` and captures the output, plus
+#     `flyctl releases`/`flyctl status` (deploy timeline + machine health —
+#     tiny, and survives past the log-retention window). Fly's own log
+#     retention is short (minutes-to-hours) — logs only help if run soon
+#     after the incident; releases/status help regardless.
+#   - recent CI run timeline via `gh run list` (list only, not full logs)
 # Plus ONCE globally:
 #   - musubi checkout git info + doctor.sh output (doctor reads musubi.toml only)
+#   - transient local build/upload logs (best-effort, /tmp/build-*.log,
+#     /tmp/upload-*.log — small text, whichever app built most recently)
 #   - Codex CLI sessions + logs (recent only; ~/.codex is not per-project)
 #
 # PRIVACY: by default this bundle contains NO chat transcripts. It collects
@@ -194,6 +205,22 @@ MANIFEST="$B/MANIFEST.txt"
 
 note() { echo "$1" | tee -a "$MANIFEST"; }
 miss() { echo "MISSING: $1" >> "$MANIFEST"; }
+
+# fly_app_name FLY_TOML — bare value of top-level `app = "..."` (before any
+# [section]); fly.toml quotes with either ' or ".
+fly_app_name() {
+  awk '
+    /^\[/ { exit }
+    /^app[ \t]*=/ {
+      line = $0
+      sub(/^app[ \t]*=[ \t]*/, "", line)
+      sub(/[ \t]*#.*$/, "", line)
+      gsub(/^["'"'"']|["'"'"']$/, "", line)
+      print line
+      exit
+    }
+  ' "$1" 2>/dev/null
+}
 
 # _copy_filtered SRCFILE DESTFILE LABEL — copy one file unless it is binary
 # or over the size cap. Returns 0 if copied, 1 if skipped/failed.
@@ -348,6 +375,60 @@ collect_app() {
     miss "[$stem] tmux session '$SESSION' (not running — orchestrator boot log unavailable)"
   fi
 
+  # Fly.io logs (best-effort). Looks for fly.toml up to 3 levels deep under
+  # the project (covers repo-root, backend/fly.toml, and nested-subproject
+  # layouts like <repo>/<app>/backend/fly.toml). Skips cleanly if flyctl
+  # isn't installed/authed — never fails the bundle.
+  if command -v flyctl >/dev/null 2>&1; then
+    fly_found=0
+    while IFS= read -r fly_toml; do
+      [ -z "$fly_toml" ] && continue
+      app_name="$(fly_app_name "$fly_toml")"
+      if [ -z "$app_name" ]; then
+        echo "MISSING: [$stem] $fly_toml has no top-level app = \"...\"" >> "$MANIFEST"
+        continue
+      fi
+      mkdir -p "$B/$APP/fly"
+      if flyctl logs -a "$app_name" --no-tail > "$B/$APP/fly/$app_name-logs.txt" 2>&1; then
+        echo "OK: [$stem] flyctl logs -a $app_name --no-tail -> fly/$app_name-logs.txt" >> "$MANIFEST"
+        fly_found=$((fly_found + 1))
+      else
+        echo "MISSING: [$stem] flyctl logs -a $app_name failed (not authed, app not found, or no recent logs — see fly/$app_name-logs.txt)" >> "$MANIFEST"
+      fi
+      # Deploy/release timeline + current machine health — tiny, and unlike
+      # `logs` this survives past Fly's short log retention window, so it's
+      # what tells you WHEN something shipped even after the logs are gone.
+      if flyctl releases -a "$app_name" > "$B/$APP/fly/$app_name-releases.txt" 2>&1; then
+        echo "OK: [$stem] flyctl releases -a $app_name -> fly/$app_name-releases.txt" >> "$MANIFEST"
+      else
+        echo "MISSING: [$stem] flyctl releases -a $app_name failed" >> "$MANIFEST"
+      fi
+      if flyctl status -a "$app_name" > "$B/$APP/fly/$app_name-status.txt" 2>&1; then
+        echo "OK: [$stem] flyctl status -a $app_name -> fly/$app_name-status.txt" >> "$MANIFEST"
+      else
+        echo "MISSING: [$stem] flyctl status -a $app_name failed" >> "$MANIFEST"
+      fi
+    done <<EOF_FLY
+$(find "$PROJ" -maxdepth 3 -name node_modules -prune -o -maxdepth 3 -name 'fly.toml' -print 2>/dev/null)
+EOF_FLY
+    [ "$fly_found" -eq 0 ] && [ ! -d "$B/$APP/fly" ] && miss "[$stem] no fly.toml found under $PROJ (3 levels deep)"
+  else
+    miss "[$stem] flyctl not installed — Fly logs unavailable"
+  fi
+
+  # Recent CI run timeline (list only — NOT full run logs, which can be huge).
+  # Gives a pass/fail/timestamp trail even when nothing else does.
+  if command -v gh >/dev/null 2>&1; then
+    if (cd "$PROJ" && gh run list -L 20 > "$B/$APP/gh-run-list.txt" 2>&1); then
+      echo "OK: [$stem] gh run list -L 20 -> gh-run-list.txt" >> "$MANIFEST"
+    else
+      echo "MISSING: [$stem] gh run list failed (no gh auth, no remote, or not a GitHub repo)" >> "$MANIFEST"
+      rm -f "$B/$APP/gh-run-list.txt" 2>/dev/null
+    fi
+  else
+    miss "[$stem] gh CLI not installed — CI run list unavailable"
+  fi
+
   # Claude Code transcripts for THIS project path. OPT-IN (-T) — transcripts can
   # quote source, comms, and pasted secrets, so they're excluded by default.
   # Claude Code stores them under ~/.claude/projects/<slug>/ where slug =
@@ -383,7 +464,24 @@ done <<EOF_TOMLS
 $TOMLS
 EOF_TOMLS
 
-# --- global section 2: Codex CLI sessions + logs (not per-project) ---------------
+# --- global section 2: transient local build/upload logs (best-effort) ---------
+# Fixed-name /tmp logs (not per-project — the build scripts always write the
+# same path, so this only ever has the MOST RECENT build/upload, whichever
+# app that was for). Small text; skipped cleanly if absent or overwritten.
+note "[global] transient build/upload logs (best-effort, /tmp)"
+mkdir -p "$B/build-logs"
+found_bl=0
+for bl in /tmp/build-ios.log /tmp/build-android.log /tmp/upload-ios.log /tmp/upload-android.log; do
+  if [ -f "$bl" ]; then
+    _copy_filtered "$bl" "$B/build-logs/$(basename "$bl")" "$bl" \
+      && { echo "OK: $bl -> build-logs/ (mtime: $(date -r "$bl" 2>/dev/null || stat -c %y "$bl" 2>/dev/null))" >> "$MANIFEST"; found_bl=$((found_bl + 1)); }
+  else
+    miss "$bl (not present — may have been overwritten by a later build, or none run)"
+  fi
+done
+[ "$found_bl" -eq 0 ] && rmdir "$B/build-logs" 2>/dev/null
+
+# --- global section 3: Codex CLI sessions + logs (not per-project) ---------------
 # OPT-IN (-T) — same privacy rationale as the Claude transcripts above.
 if [ "$INCLUDE_TRANSCRIPTS" -ne 1 ]; then
   echo "EXCLUDED: Codex CLI transcripts (privacy default; pass -T to include)" >> "$MANIFEST"
@@ -433,6 +531,9 @@ fi
   echo "- comms + capsule + agent docs ........ YES (always)"
   echo "- config tomls (paths/handles) ........ YES (secrets are not stored in toml)"
   echo "- tmux pane scrollback ................ when a session was live (see per-app lines above)"
+  echo "- Fly.io logs/releases/status .......... when flyctl + fly.toml found (see per-app lines above; can contain request/job IDs, emails)"
+  echo "- gh CI run list ....................... when gh CLI authed (list only: status/branch/timestamp, no log bodies)"
+  echo "- transient build/upload logs (/tmp) .... when present (see build-logs/ lines above)"
   if [ "$INCLUDE_TRANSCRIPTS" -eq 1 ]; then
     echo "- agent chat transcripts (Claude/Codex) INCLUDED via -T — redaction pass applied"
   else
