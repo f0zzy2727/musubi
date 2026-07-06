@@ -164,10 +164,16 @@ while IFS= read -r toml; do
   if [ "$vis_ok" -eq 1 ] && [ "$arch_ok" -eq 1 ]; then
     ok "has a real north-star (product vision + architecture present)"
   else
-    [ "$vis_ok" -eq 1 ] && ok "product vision present" \
-                        || scaffold_pillar VISION.md docs/PRODUCT-VISION.md "product vision"
-    [ "$arch_ok" -eq 1 ] && ok "architecture present" \
-                         || scaffold_pillar ARCHITECTURE.md docs/ARCHITECTURE.md "architecture"
+    if [ "$vis_ok" -eq 1 ]; then
+      ok "product vision present"
+    else
+      scaffold_pillar VISION.md docs/PRODUCT-VISION.md "product vision"
+    fi
+    if [ "$arch_ok" -eq 1 ]; then
+      ok "architecture present"
+    else
+      scaffold_pillar ARCHITECTURE.md docs/ARCHITECTURE.md "architecture"
+    fi
   fi
 
   # 2) durable I&A home (off the IaA.md append-trap)
