@@ -8,6 +8,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Oya boot context is now machine-injected (north-star-2 + re-anchor gate).**
+  New `scripts/oya-boot-context.py` (called by `attach-oya.sh` at paste time)
+  replaces the prompt's `<OYA_BOOT_CONTEXT>` placeholder with (1) a git
+  ground-truth snapshot of the project — HEAD, branch ahead/behind, dirty
+  state, worktrees, branches carrying commits HEAD lacks — and (2) the inlined
+  BODIES of `[agents.oyakata].context_docs` (or the recognised vision-doc set),
+  size-capped with explicit MUST-READ truncation markers. The Oya prompt gains
+  a matching hard gate (no GO / verify / dispatch before per-doc body-read
+  proof in READY; test-framed boots don't waive it), a RE-ANCHOR verdict when
+  the snapshot diverges from the capsule, and a "ground truth & premise"
+  discipline section. Field origin (2026-07-06): a relay-test boot skipped the
+  vision doc and a fork created by out-of-musubi desktop work went unnoticed —
+  the session then verify-PASSed a product-invariant violation and built a
+  whole reconciliation program from a stale branch's commit messages.
+- **Runbook v1.11: shipped-trunk premise gate.** Before any reconciliation /
+  merge / cherry-pick program executes, the premise must be verified against
+  the shipped trunk's actual behaviour ("does the trunk already do this?") —
+  a source branch's commit messages and `Baseline:` lines are claims, not
+  evidence. Same field origin as above.
+
+### Fixed
+
+- **`collect-debug-bundle.sh` handles absolute `context_docs` paths** — they
+  were joined onto the project root, producing false `MISSING:
+  <project>//Users/...` manifest lines for shared cross-app docs.
+- **Oya prompt no longer hardcodes the `musubi` tmux session or "v1.7"
+  runbook version** — `attach-oya.sh` substitutes `<TMUX_SESSION>` and the
+  prompt defers to the runbook's own header, ending the boot-time corrections
+  every multi-app bed had to make.
+
 - **Cross-app setup repair tooling.** New `scripts/setup-fix.sh` (mechanical
   engine: scaffolds a real north-star, creates a durable `docs/i-and-a/` home,
   repairs binary/corrupt comms files, lays a shared cross-app rules skeleton;

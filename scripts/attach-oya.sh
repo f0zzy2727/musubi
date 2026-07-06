@@ -496,23 +496,61 @@ substitute_paths() {
   # operator handle ([operator].handle, passed by the orchestrator as
   # MUSUBI_OPERATOR_HANDLE) so Oya addresses the operator by name instead of
   # defaulting to @LEAD. No-op when unset or already @LEAD.
+  # <TMUX_SESSION> keeps the prompt's tmux commands pointed at the real
+  # session name — the committed prompt used a literal `musubi`, which every
+  # multi-app bed (session per app) had to notice and correct at boot.
   sed -e "s|<PROJECT_PATH>|$TARGET|g" \
       -e "s|<MUSUBI_ROOT>|$MUSUBI_ROOT|g" \
+      -e "s|<TMUX_SESSION>|$SESSION|g" \
       -e "s|@LEAD|$OPERATOR_HANDLE|g"
 }
 
-prompt_lines=$(sed -n '/^## Prompt/,$p' "$PROMPT_FILE" | wc -l | tr -d ' ')
+# --- Boot-context block (north-star-2 / re-anchor gate) ------------
+# Generate the machine-made boot context — a git ground-truth snapshot of the
+# project plus the CONTENT of the north-star docs — and splice it over the
+# prompt's <OYA_BOOT_CONTEXT> placeholder. Injecting the content (rather than
+# instructing a read) is the fix for the 2026-07-06 field incident: a boot
+# that skipped the vision doc led to a product-blind verify, and a fork
+# created by out-of-musubi work went unnoticed. Generation failure degrades
+# to an explicit do-it-manually note, never to silence.
+BOOT_CONTEXT_FILE=$(mktemp "${TMPDIR:-/tmp}/oya-boot-context.XXXXXX")
+BOOT_CONTEXT_GEN="$MUSUBI_ROOT/scripts/oya-boot-context.py"
+if command -v python3 >/dev/null 2>&1 && [ -f "$BOOT_CONTEXT_GEN" ] \
+   && python3 "$BOOT_CONTEXT_GEN" "$CONFIG_TOML" "$TARGET" > "$BOOT_CONTEXT_FILE" 2>/dev/null; then
+  log "boot context generated ($(wc -l < "$BOOT_CONTEXT_FILE" | tr -d ' ') lines: repo ground truth + north-star content)"
+else
+  printf '%s\n' \
+    "## Boot context (GENERATION FAILED)" \
+    "" \
+    "attach-oya.sh could not generate the machine boot context. You MUST do both halves manually before your first GO/verify:" \
+    "1. Snapshot repo ground truth yourself (git log -1 / status / branch list / worktree list) and reconcile it against the capsule." \
+    "2. Read the north-star docs' BODIES (context_docs in musubi.toml, or the recognised vision/architecture files)." \
+    "Note the generation failure in your READY block." > "$BOOT_CONTEXT_FILE"
+  log "WARNING: boot-context generation failed — prompt carries a manual-fallback note instead"
+fi
+
+render_prompt() {
+  # Final prompt: ## Prompt section, paths substituted, boot context spliced
+  # over the placeholder line. awk file-splice, not sed, so the block's
+  # arbitrary content (quotes, $, backslashes) is inserted verbatim.
+  sed -n '/^## Prompt/,$p' "$PROMPT_FILE" | substitute_paths \
+    | awk -v ctx="$BOOT_CONTEXT_FILE" '
+        /^<OYA_BOOT_CONTEXT>$/ { while ((getline line < ctx) > 0) print line; next }
+        { print }'
+}
+
+prompt_lines=$(render_prompt | wc -l | tr -d ' ')
 if [ -n "$CLIPBOARD_CMD" ]; then
   # shellcheck disable=SC2086  # $CLIPBOARD_CMD may legitimately contain args (e.g. "xclip -selection clipboard")
-  sed -n '/^## Prompt/,$p' "$PROMPT_FILE" | substitute_paths | $CLIPBOARD_CMD
-  log "prompt copied to clipboard via '$CLIPBOARD_CMD' (${prompt_lines} lines, paths substituted; manual paste fallback ready)"
+  render_prompt | $CLIPBOARD_CMD
+  log "prompt copied to clipboard via '$CLIPBOARD_CMD' (${prompt_lines} lines, paths + boot context substituted; manual paste fallback ready)"
 else
   log "prompt NOT copied to clipboard (no tool available); auto-paste via tmux paste-buffer is the only path"
 fi
 
 if [ "$FRESH_OYA" -eq 1 ]; then
   log "auto-pasting prompt into Oya pane $oyakata_id ..."
-  sed -n '/^## Prompt/,$p' "$PROMPT_FILE" | substitute_paths | tmux load-buffer -b oya-prompt -
+  render_prompt | tmux load-buffer -b oya-prompt -
   # -p wraps the content in bracketed-paste control codes when the TUI has
   # requested them (Claude Code 2.x does). That preserves newlines as content
   # rather than each one submitting a partial message.
@@ -524,6 +562,7 @@ if [ "$FRESH_OYA" -eq 1 ]; then
 else
   log "Oya pane already running; not re-pasting prompt"
 fi
+rm -f "$BOOT_CONTEXT_FILE"
 
 # --- Done ---------------------------------------------------------
 # Skip the trailing cheat-sheet when invoked by the orchestrator

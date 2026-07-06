@@ -357,7 +357,13 @@ collect_app() {
   if [ -n "$ctx_raw" ]; then
     echo "[$stem] context_docs line: $ctx_raw" >> "$MANIFEST"
     echo "$ctx_raw" | grep -oE '"[^"]*"' | tr -d '"' | while read -r p; do
-      [ -n "$p" ] && copy_one "$PROJ/$p" "$APP/north-star/context_docs"
+      [ -n "$p" ] || continue
+      # context_docs entries may be absolute (e.g. a shared-intent doc outside
+      # the project); joining those onto $PROJ produced false MISSING lines.
+      case "$p" in
+        /*) copy_one "$p"       "$APP/north-star/context_docs" ;;
+        *)  copy_one "$PROJ/$p" "$APP/north-star/context_docs" ;;
+      esac
     done
   fi
 

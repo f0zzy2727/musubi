@@ -2,8 +2,8 @@
 
 # Agent Collaboration Runbook
 
-**Version:** 1.10
-**Last updated:** 2026-05-30
+**Version:** 1.11
+**Last updated:** 2026-07-06
 **Status:** Active
 
 Two AI agents. One human lead. A shared codebase. This runbook defines how the three of you work together without stepping on each other, losing context, or turning the human into a full-time message broker.
@@ -702,6 +702,12 @@ Every diagnosis in comms, commit messages, handoffs, or retro docs is labelled a
 - **`confirmed root cause`** — evidence has closed the loop. Evidence type MUST be named: `query`, `prod diagnostic`, `failing test`, `screenshot comparison`, or `reproduction`
 
 If later evidence contradicts a confirmed claim, the handoff or incident retro MUST update the narrative — the incorrect claim is explicitly labelled as a wrong assumption. Do not paper over an incorrect diagnosis with a follow-up fix and call it done.
+
+### Shipped-trunk premise gate
+
+Before executing any reconciliation, merge, cherry-pick, or "port these fixes" program — whoever dispatched it — verify the premise against the shipped trunk's actual behaviour: **does the trunk already do this?** Commit messages, `Baseline:` lines, and PR descriptions on the source branch are claims authored by the agent that wants the change to land; they are not evidence of absence on the trunk. "This exact SHA is absent from the trunk" is the cheap half of the check; "the trunk already solves this differently" is the load-bearing half, and the half that gets skipped. State the grounding in the claim message (file/behaviour verified on trunk, not message text), or flag the assignment as ungrounded before starting.
+
+**Mechanism:** an ungrounded reconciliation multiplies itself — every review round downstream of a false premise is diligent work on a manufactured task (field incident 2026-07-06: a multi-round, two-vendor, verify-PASSed integration program was built entirely from a stale branch's commit messages while the trunk already shipped everything claimed; only the operator's product knowledge stopped the merge).
 
 ### Three-consecutive-patches circuit breaker
 
