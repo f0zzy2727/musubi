@@ -540,10 +540,20 @@ inject_block "$TARGET/CLAUDE.md" \
              "$MUSUBI_ROOT/templates/musubi-block-claude.md" \
              "$MUSUBI_ROOT/templates/CLAUDE.md.template" \
              "CLAUDE.md"
-inject_block "$TARGET/AGENTS.md" \
-             "$MUSUBI_ROOT/templates/musubi-block-agents.md" \
-             "$MUSUBI_ROOT/templates/AGENTS.md.template" \
-             "AGENTS.md"
+# Some projects symlink AGENTS.md -> CLAUDE.md (one rules file for both
+# harnesses). Injecting the AGENTS-variant block through the symlink would
+# clobber the CLAUDE-variant block in the same physical file, leaving --check
+# permanently stale. Detect samefile and keep the CLAUDE block as canonical.
+if [ -e "$TARGET/AGENTS.md" ] && [ -e "$TARGET/CLAUDE.md" ] && \
+   python3 -c 'import os,sys; sys.exit(0 if os.path.samefile(sys.argv[1], sys.argv[2]) else 1)' \
+     "$TARGET/AGENTS.md" "$TARGET/CLAUDE.md" 2>/dev/null; then
+  echo "  = AGENTS.md resolves to CLAUDE.md (symlink/hardlink) — CLAUDE block is canonical, skipping AGENTS injection"
+else
+  inject_block "$TARGET/AGENTS.md" \
+               "$MUSUBI_ROOT/templates/musubi-block-agents.md" \
+               "$MUSUBI_ROOT/templates/AGENTS.md.template" \
+               "AGENTS.md"
+fi
 echo ""
 
 # ---------------------------------------------------------------------------
