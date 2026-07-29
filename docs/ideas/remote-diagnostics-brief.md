@@ -5,8 +5,8 @@ built. Status: concept, pre-grilling.*
 
 ## Origin
 
-Dogfooded from a live pain. Diagnosing Michael's voice-reclone incident meant
-John acting, by hand, as a remote troubleshooting agent over a zipped debug
+Dogfooded from a live pain. Diagnosing a field operator's voice-reclone incident
+meant acting, by hand, as a remote troubleshooting agent over a zipped debug
 bundle (`scripts/collect-debug-bundle.sh`). The idea is to **automate that exact
 loop**: an agent on one musubi install helps troubleshoot another install,
 remotely.

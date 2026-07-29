@@ -405,7 +405,7 @@ def test_wake_governor_disabled_when_max_zero():
     assert g.tripped is False
 
 
-def test_wake_governor_michael_burn_rate_trips_fast():
+def test_wake_governor_field_burn_rate_trips_fast():
     # The 2026-06-30 signature: a nudge every few minutes for hours. With the
     # default 10/hour cap, the 11th nudge inside the hour is suppressed.
     g = WakeGovernor()  # defaults: 10 / 3600s

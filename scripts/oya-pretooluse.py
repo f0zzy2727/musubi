@@ -211,7 +211,7 @@ def classify_sed_read(command: str) -> tuple[bool, str]:
 # --- Blast-radius gate (blast-1, 2026-06-24) ---------------------------------
 # A different axis from the disclosure tiers above. Those ask "does this leak
 # secrets?"; this asks "is this an expensive / irreversible / fan-out ACTION?"
-# Field report (Michael, 1-in-a-billion bed): "apply this to the other apps"
+# Field report (1-in-a-billion bed): "apply this to the other apps"
 # became "re-clone every voice for the other apps" — an API spend that overwrote
 # resources that already existed, hand-stopped by the operator; neither peer nor
 # Oya flagged it. The existing tiers only DEFER such a command (a generic prompt
