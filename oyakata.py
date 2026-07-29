@@ -232,21 +232,6 @@ TIER2_VERDICT_TIMEOUT_S = 20
 TIER2_VERDICT_POLL_INTERVAL_S = 0.5
 
 
-def tier2_pending_dir(project_path):
-    """Absolute path to the tier-2 pending-decisions directory for the
-    project. Created lazily (by the hook on first write, or by the watcher
-    on first scan) — not at orchestrator boot, because the directory only
-    matters when the permissions layer is enabled."""
-    return os.path.join(project_path, TIER2_PENDING_DIR)
-
-
-def tier2_request_filename(request_id):
-    """Just the basename — caller joins it with the pending dir. Suffixed
-    `.request.json` so glob patterns can distinguish requests from
-    verdicts written by Oya into the same directory."""
-    return f"{request_id}.request.json"
-
-
 def tier2_verdict_filename(request_id):
     """Verdict file basename for a given request_id."""
     return f"{request_id}.verdict.json"

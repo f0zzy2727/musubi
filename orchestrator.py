@@ -116,12 +116,6 @@ def capture_pane(pane, lines=40):
         return ""
 
 
-def pane_contains(pane, needle, lines=80):
-    """Convenience: True if `needle` appears in the last N lines of the pane.
-    Strips ANSI so the match works even when the CLI is using colour codes."""
-    return needle in strip_ansi(capture_pane(pane, lines))
-
-
 # Known UI hint / placeholder fragments that follow a prompt marker but are NOT
 # typed user input — must not be mistaken for an unsent command.
 _PROMPT_HINT_MARKERS = (
