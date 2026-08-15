@@ -2,8 +2,8 @@
 
 # Agent Collaboration Runbook
 
-**Version:** 1.11
-**Last updated:** 2026-07-06
+**Version:** 1.12
+**Last updated:** 2026-08-15
 **Status:** Active
 
 Two AI agents. One human lead. A shared codebase. This runbook defines how the three of you work together without stepping on each other, losing context, or turning the human into a full-time message broker.
@@ -22,14 +22,15 @@ Two AI agents. One human lead. A shared codebase. This runbook defines how the t
 6. [Current-State Capsule](#current-state-capsule)
 7. [Execution Protocol](#execution-protocol)
 8. [Review Pattern](#review-pattern)
-9. [Mechanical Gates](#mechanical-gates)
-10. [Rule Quality](#rule-quality)
-11. [Preserve Deliberate State](#preserve-deliberate-state)
-12. [Final Gate](#final-gate)
-13. [Handoff Expectations](#handoff-expectations)
-14. [Startup and Recovery](#startup-and-recovery)
-15. [Practical Defaults](#practical-defaults)
-16. [Reference (load on demand)](#reference-load-on-demand)
+9. [Evidence Discipline](#evidence-discipline)
+10. [Mechanical Gates](#mechanical-gates)
+11. [Rule Quality](#rule-quality)
+12. [Preserve Deliberate State](#preserve-deliberate-state)
+13. [Final Gate](#final-gate)
+14. [Handoff Expectations](#handoff-expectations)
+15. [Startup and Recovery](#startup-and-recovery)
+16. [Practical Defaults](#practical-defaults)
+17. [Reference (load on demand)](#reference-load-on-demand)
 
 ---
 
@@ -714,6 +715,93 @@ Before executing any reconciliation, merge, cherry-pick, or "port these fixes" p
 If the same feature requires 3+ consecutive production fixes, **STOP**. Do a full investigation. List all remaining issues. Fix them together. Do not continue the patch-push-test-fail loop. Production is not a debugging environment; the human lead is not the integration test.
 
 Do not roll from one completed slice into the next if a review or design decision is still outstanding.
+
+---
+
+## Evidence Discipline
+
+A green suite is a claim, not a fact. These rules exist because a run of operator-visible
+defects shipped in the 2026-08-13/15 window while every gate reported pass. Each one is
+the generalisation of a specific escape.
+
+### A check must be seen to fail
+
+Every new check — not only a bugfix regression — must be **observed failing** against the
+condition it names, then restored. `bug-path test gate` already said this for bugfixes;
+that narrow scope is precisely how new-feature and infrastructure checks escaped it.
+
+Two of seventeen cockpit checks written the day this rule was added were green *with the
+defect present*: one compared against a selector that matched nothing, and its replacement
+failed on good code too. Neither would have been found without breaking the code on purpose.
+
+**Mechanism:**
+- Run: break the behaviour (comment the line, restore the old branch), run the check, restore
+- Expect: the check goes red, and names the actual defect
+- Fail if: it stays green with the defect present — it is not a test of that behaviour, whatever it is called
+
+### No source-text assertion standing in for behaviour
+
+A regex over a file proves a string is present. It cannot prove the code runs, runs on the
+right data, or renders. 1,930 lines of cockpit JavaScript were "covered" by `node --check`
+plus ~60 text assertions and had never once been executed.
+
+Text assertions are legitimate for *structure* — declaration order, a literal that must stay
+absent — and must say so where they live. Behaviour is asserted by running it.
+
+**Mechanism:**
+- Run: for any assertion over source text, state whether it asserts structure or behaviour
+- Expect: behaviour assertions execute the code; structural ones say why text is the right layer
+- Fail if: a grep stands in for "this works"
+
+### Verify at the operator's layer
+
+The layer you changed is not the layer that matters. A guard shipped that stopped `./bridge`
+booting at all while every test passed, because the suite was both the instrument and the
+thing under test. A CSS rule was asserted present and was inert. A marker had 90 passing
+source assertions against a build where it never rendered.
+
+**Mechanism:**
+- Run: exercise the operator's path — boot the daemon, load the page, click the control
+- Expect: the observable outcome the operator would see
+- Fail if: the only evidence is a passing unit test on the layer you edited
+
+### Delegate resolution to the runtime
+
+When a check asserts "the runtime would accept this", call the runtime's own resolver rather
+than reimplementing its rules. An import gate hand-rolled module resolution three times and
+produced three false failures — extensionless CommonJS, directory index, and URL query
+specifiers — each rejecting code that runs.
+
+A checker that rejects valid work is worse than one that misses invalid work, because it
+blocks correct changes and trains people to disable it.
+
+**Mechanism:**
+- Run: resolve through the real API (`createRequire().resolve`, `new URL`, the parser itself)
+- Expect: the gate's verdict matches the runtime's on both accept and reject fixtures
+- Fail if: the rule is a reimplementation of documented resolution behaviour
+
+### State what was not covered
+
+Say plainly what the evidence does *not* reach. "53/53 green" was claimed three times while
+the result depended on credentials present on one machine; under a hermetic environment it
+was 52 passed, 2 failed. CI was red on all six pushes that day and nobody looked.
+
+**Mechanism:**
+- Run: name the environment and the gap in the same sentence as the claim — "54/54 on Node 26 only; 22 and 24 unverified"
+- Expect: an explicit uncovered list, including runtimes, platforms and skipped gates
+- Fail if: a bare pass count is offered as assurance
+
+### A protocol change lands in the canonical copy
+
+A rule filed where it does not ship is not a rule. The Definition-of-Done amendment closing
+the "tests added or updated" loophole was written into a copy of `PAIR_OPERATING_MODEL.md`
+that was excluded from every distribution — the fix for "rules never get encoded", encoded
+where nothing reads it.
+
+**Mechanism:**
+- Run: after editing any protocol document, confirm the edited path is the one distribution consumes
+- Expect: the change present in the shipped artifact, not only in the working repo
+- Fail if: the file is a duplicate, a fork, or excluded by the packaging step
 
 ---
 

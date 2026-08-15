@@ -9,7 +9,7 @@
 
 schema_version: 1
 project: <PROJECT-SLUG>             # rename when copying into a new install
-runbook_version: "1.7"
+runbook_version: "1.12"
 generated_at: <SET-AT-BOOTSTRAP>
 last_updated_at: <SET-AT-BOOTSTRAP>
 last_updated_cycle: initial-bootstrap
@@ -24,7 +24,7 @@ rules:
     runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § Orchestrator-enforced guards"
     citation_pattern: "ack-of-ack"
     provenance:
-      added_in_runbook_version: "1.7"
+      added_in_runbook_version: "1.12"
       added_on: 2026-05-14
       added_reason: |
         Three-way external review surfaced the "two agents acknowledging each
@@ -42,7 +42,7 @@ rules:
     runbook_section: "AGENT_COLLAB_RUNBOOK.md § Comms Protocol § Orchestrator-enforced guards"
     citation_pattern: "capsule-staleness"
     provenance:
-      added_in_runbook_version: "1.7"
+      added_in_runbook_version: "1.12"
       added_on: 2026-05-14
       added_reason: |
         Mechanical enforcement of capsule-before-comms invariant. Refuses
@@ -83,7 +83,7 @@ rules:
     runbook_section: "AGENT_COLLAB_RUNBOOK.md § Current-State Capsule § Capsule timestamps must come from `date -u`"
     citation_pattern: "date -u"
     provenance:
-      added_in_runbook_version: "1.7"
+      added_in_runbook_version: "1.12"
       added_on: 2026-05-18
       added_reason: |
         Oya spike caught three independent timestamp-drift instances in one
@@ -104,7 +104,7 @@ rules:
     runbook_section: 'AGENT_COLLAB_RUNBOOK.md § Review Pattern § "Findings I went looking for" block (mandatory)'
     citation_pattern: "Findings I went looking for"
     provenance:
-      added_in_runbook_version: "1.7"
+      added_in_runbook_version: "1.12"
       added_on: 2026-05-14
       added_reason: |
         Three-way external review found pair reviews trended toward
@@ -122,7 +122,7 @@ rules:
     runbook_section: "AGENT_COLLAB_RUNBOOK.md § Review Pattern § Spot-check on rubber-stamps"
     citation_pattern: "spot-check"
     provenance:
-      added_in_runbook_version: "1.7"
+      added_in_runbook_version: "1.12"
       added_on: 2026-05-14
       added_reason: |
         If review approves >50 LOC or >3 files with zero findings, third-party
@@ -527,6 +527,120 @@ rules:
       = 3 in scripts/classify-slice-disciplines.py. Strict greater-than
       (exactly-at threshold does not fire). Refine thresholds if patterns
       surface in the ledger.
+
+  # ─── Evidence discipline (v1.12) ────────────────────────────────────────
+
+  - id: check-seen-to-fail
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § A check must be seen to fail"
+    citation_pattern: "seen to fail"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        Generalises bug-path-test-gate beyond bugfixes. That rule's narrow scope
+        is how new-feature and infrastructure checks escaped it: 2 of 17 cockpit
+        checks were green WITH the defect present, found only by breaking the
+        code deliberately.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: no-source-text-for-behaviour
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § No source-text assertion standing in for behaviour"
+    citation_pattern: "source-text assertion"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        1,930 lines of cockpit JavaScript were "covered" by node --check plus
+        ~60 regex assertions and had never been executed. A regex proves a
+        string is present, never that code runs or renders.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: verify-at-operator-layer
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § Verify at the operator's layer"
+    citation_pattern: "operator's layer"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        A launcher guard shipped that stopped ./bridge booting at all while every
+        test passed — the suite was both instrument and subject. Also a CSS rule
+        asserted present and inert, and a marker with 90 passing source
+        assertions against a build where it never rendered.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: delegate-resolution-to-runtime
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § Delegate resolution to the runtime"
+    citation_pattern: "delegate resolution"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        An import gate hand-rolled module resolution three times and produced
+        three FALSE FAILURES — extensionless CommonJS, directory index, URL
+        query specifiers — each rejecting code that runs. A checker that rejects
+        valid work is worse than one that misses invalid work.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: state-what-is-uncovered
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § State what was not covered"
+    citation_pattern: "not covered"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        "53/53 green" claimed three times while the result depended on
+        credentials present on one machine; hermetically it was 52/2. CI was red
+        on all six pushes that day and nobody looked.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
+
+  - id: protocol-change-lands-canonical
+    type: discipline
+    scope: framework
+    runbook_section: "AGENT_COLLAB_RUNBOOK.md § Evidence Discipline § A protocol change lands in the canonical copy"
+    citation_pattern: "canonical copy"
+    provenance:
+      added_in_runbook_version: "1.12"
+      added_on: 2026-08-15
+      added_reason: |
+        The DoD amendment closing the "tests added or updated" loophole was
+        written into a copy of PAIR_OPERATING_MODEL.md excluded from every
+        distribution — the fix for "rules never get encoded", encoded where
+        nothing reads it.
+    fires: { total: 0, by_cycle: {} }
+    catches: { total: 0, by_class: {}, examples: [] }
+    bypasses: { total: 0, examples: [] }
+    silent_misses: { total: 0, examples: [] }
+    notes: ""
 
   # ─── Project-specific STOP rules ───────────────────────────────────────
   #

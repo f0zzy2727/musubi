@@ -218,7 +218,24 @@ Vague verbs (`verify`, `ensure`, `confirm`) are unenforceable. Every rule names 
 **The human owns priorities and closes gates.** No self-approving merges. Cycles close when the human says, not when it feels done. The Definition of Done is concrete and shared:
 
 - Code changes with file-level evidence.
-- Tests added or updated.
+- **A test that has been SEEN TO FAIL without the fix.** Not "a test was added" —
+  that phrasing was the loophole, and every defect shipped in the 2026-08-13/14
+  window satisfied it. Break the fix (comment the line, restore the old branch),
+  watch the test go red, put it back. If it stays green it is not a test of that
+  behaviour, whatever it is called. Costs about a minute, and it is the single
+  check that would have caught most of what reached an operator. It caught two
+  flaws in the tests written the day this rule was added.
+- **No source-text assertion standing in for behaviour.** A regex over a file
+  proves a string is present. It cannot prove the code runs, runs on the right
+  data, or renders anything — 1,930 lines of cockpit JS were "covered" that way
+  and had never once been executed. Grep-assertions are fine for *structure*
+  (declaration order, a literal that must stay absent) and must say so; behaviour
+  is asserted by running it. See `test/helpers/cockpit-dom.mjs`.
+- **Residual coverage stated where the test lives.** If a class cannot be tested at
+  this layer — jsdom resolves no CSS custom properties, so nothing visual is
+  provable there — write that down instead of leaving a check that passes for the
+  wrong reason. A test that cannot fail is worse than a missing one, because it is
+  counted as coverage.
 - CI passes (lint, type-check, test, build).
 - Production-start smoke (where applicable) passes.
 - Docs updated (ADRs, backlogs, runbook entries).
